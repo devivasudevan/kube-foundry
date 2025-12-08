@@ -148,6 +148,8 @@ Handles all Kubernetes API interactions:
 - Get pod status
 - Check cluster connectivity
 - Namespace management
+- Check GPU availability on nodes (`nvidia.com/gpu` resources)
+- Check GPU Operator installation status (CRDs, pods)
 
 ### ConfigService
 Manages application configuration:
@@ -160,3 +162,4 @@ Handles Helm CLI operations:
 - Check Helm availability
 - Add/update repositories
 - Install/upgrade/uninstall charts
+- Install NVIDIA GPU Operator (`gpu-operator` namespace)

@@ -7,7 +7,9 @@
     "dev": "bun --watch src/index.ts",
     "build": "tsc",
     "start": "bun src/index.ts",
-    "compile": "bun build --compile --outfile dist/kubefoundry src/index.ts",
+    "embed": "bun scripts/embed-assets.ts",
+    "precompile": "bun run embed",
+    "compile": "bun build --compile --outfile ../dist/kubefoundry src/index.ts",
     "lint": "eslint src --ext .ts",
     "test": "bun test"
   },

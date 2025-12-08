@@ -46,6 +46,9 @@ temp/
 # TypeScript cache
 *.tsbuildinfo
 
+# Generated files
+backend/src/embedded-assets.ts
+
 # Playwright
 /test-results/
 /playwright-report/

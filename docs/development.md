@@ -22,15 +22,22 @@ bun run dev
 
 ## Building a Single Binary
 
-The backend can be compiled to a standalone executable:
+The project can be compiled to a standalone executable that includes both the backend API and embedded frontend assets:
 
 ```bash
-# Compile to single binary
+# Compile to single binary (includes frontend)
 bun run compile
 
-# Run the binary (no runtime required)
-./backend/dist/kubefoundry
+# Run the binary (serves both API and frontend on port 3001)
+./dist/kubefoundry
 ```
+
+The compile process:
+1. Builds the frontend with Vite
+2. Embeds frontend assets as base64 in `backend/src/embedded-assets.ts`
+3. Compiles everything into a single ~64MB executable
+
+The binary is completely self-contained - no additional files needed.
 
 ## Environment Variables
 
@@ -54,7 +61,7 @@ CORS_ORIGIN=http://localhost:5173
 ```bash
 bun run dev           # Start both frontend and backend
 bun run build         # Build all packages
-bun run compile       # Build single binary for backend
+bun run compile       # Build single binary (frontend + backend) to dist/kubefoundry
 bun run lint          # Lint all packages
 ```
 

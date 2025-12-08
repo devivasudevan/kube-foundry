@@ -36,12 +36,12 @@ dev-backend:
 build:
 	bun run build
 
-# Compile single binary
+# Compile single binary (includes frontend)
 compile:
 	bun run compile
 	@echo ""
-	@echo "✅ Binary created: backend/dist/kubefoundry"
-	@ls -lh backend/dist/kubefoundry
+	@echo "✅ Binary created: dist/kubefoundry (includes frontend)"
+	@ls -lh dist/kubefoundry
 
 # Linting
 lint:
@@ -54,6 +54,6 @@ test:
 # Clean build artifacts
 clean:
 	rm -rf node_modules frontend/node_modules backend/node_modules shared/node_modules
-	rm -rf frontend/dist backend/dist shared/dist
+	rm -rf dist frontend/dist backend/dist shared/dist
 	rm -f bun.lockb
 	@echo "✅ Cleaned all build artifacts"

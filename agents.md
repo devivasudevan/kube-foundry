@@ -25,16 +25,21 @@ This document provides context for AI agents working on the KubeFoundry codebase
 
 ```
 kubefoundry/
+├── dist/                 # Compiled single binary output
+│   └── kubefoundry       # Single executable (frontend + backend)
 ├── frontend/src/
-│   ├── components/     # UI components (layout/, models/, deployments/, ui/)
-│   ├── pages/          # Page components
-│   ├── hooks/          # React hooks for API calls
-│   └── lib/            # API client and utilities
-├── backend/src/
-│   ├── providers/      # Provider implementations (dynamo/, kuberay/)
-│   ├── routes/         # Express API routes
-│   └── services/       # Core services (kubernetes, config, helm)
-└── shared/types/       # Shared TypeScript types
+│   ├── components/       # UI components (layout/, models/, deployments/, ui/)
+│   ├── pages/            # Page components
+│   ├── hooks/            # React hooks for API calls
+│   └── lib/              # API client and utilities
+├── backend/
+│   ├── scripts/          # Build scripts (embed-assets.ts)
+│   └── src/
+│       ├── providers/    # Provider implementations (dynamo/, kuberay/)
+│       ├── routes/       # Express API routes
+│       ├── services/     # Core services (kubernetes, config, helm)
+│       └── static.ts     # Static file serving (embedded/filesystem)
+└── shared/types/         # Shared TypeScript types
 ```
 
 ## Key Concepts
@@ -65,5 +70,7 @@ All inference runtime logic is encapsulated in provider implementations:
 - `backend/src/providers/types.ts` - Provider interface definition
 - `backend/src/providers/index.ts` - Provider registry
 - `backend/src/services/kubernetes.ts` - Kubernetes API client
+- `backend/src/static.ts` - Static file serving with embedded assets support
+- `backend/scripts/embed-assets.ts` - Generates embedded frontend assets module
 - `frontend/src/lib/api.ts` - Frontend API client
 - `shared/types/` - Shared type definitions

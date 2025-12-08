@@ -111,6 +111,47 @@ Upgrade an installed provider.
 ### POST /installation/providers/:id/uninstall
 Uninstall a provider.
 
+### GET /installation/gpu-operator/status
+Check NVIDIA GPU Operator installation status and GPU availability.
+
+**Response:**
+```json
+{
+  "installed": true,
+  "crdFound": true,
+  "operatorRunning": true,
+  "gpusAvailable": true,
+  "totalGPUs": 4,
+  "gpuNodes": ["node-1", "node-2"],
+  "message": "GPUs enabled: 4 GPU(s) on 2 node(s)",
+  "helmCommands": [
+    "helm repo add nvidia https://helm.ngc.nvidia.com/nvidia",
+    "helm repo update",
+    "helm install gpu-operator nvidia/gpu-operator --namespace gpu-operator --create-namespace"
+  ]
+}
+```
+
+### POST /installation/gpu-operator/install
+Install the NVIDIA GPU Operator via Helm.
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "NVIDIA GPU Operator installed successfully",
+  "status": {
+    "installed": true,
+    "crdFound": true,
+    "operatorRunning": true,
+    "gpusAvailable": false,
+    "totalGPUs": 0,
+    "gpuNodes": [],
+    "message": "GPU Operator installed but no GPUs detected on nodes"
+  }
+}
+```
+
 ## Models
 
 ### GET /models
