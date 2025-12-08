@@ -11,7 +11,7 @@ export class KubeRayProvider implements Provider {
   id = 'kuberay';
   name = 'KubeRay';
   description = 'KubeRay enables Ray Serve on Kubernetes for scalable LLM inference with vLLM backend, supporting both aggregated and disaggregated (P/D) serving modes.';
-  defaultNamespace = 'default';
+  defaultNamespace = 'kuberay-system';
 
   // CRD Constants
   private static readonly API_GROUP = 'ray.io';

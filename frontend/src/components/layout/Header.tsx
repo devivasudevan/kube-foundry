@@ -64,12 +64,6 @@ export function Header() {
               Cluster: {clusterStatus.clusterName}
             </Badge>
           )}
-
-          {clusterStatus?.namespace && (
-            <Badge variant="outline">
-              Namespace: {clusterStatus.namespace}
-            </Badge>
-          )}
         </div>
       </div>
     </header>

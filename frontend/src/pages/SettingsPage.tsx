@@ -172,7 +172,7 @@ export function SettingsPage() {
             <Input
               id="namespace"
               value={settings?.config.defaultNamespace || providerDetails?.defaultNamespace || ''}
-              placeholder={providerDetails?.defaultNamespace || 'kubefoundry'}
+              placeholder={providerDetails?.defaultNamespace || 'default'}
               disabled
             />
             <p className="text-xs text-muted-foreground">

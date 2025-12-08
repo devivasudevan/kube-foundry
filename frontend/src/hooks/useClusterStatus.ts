@@ -10,7 +10,7 @@ export function useClusterStatus() {
       } catch {
         return {
           connected: false,
-          namespace: 'kubefoundry',
+          namespace: 'default',
           error: 'Failed to connect to backend',
         }
       }

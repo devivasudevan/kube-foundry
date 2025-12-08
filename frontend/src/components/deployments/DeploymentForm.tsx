@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -7,6 +7,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Switch } from '@/components/ui/switch'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useCreateDeployment, type DeploymentConfig } from '@/hooks/useDeployments'
+import { useSettings } from '@/hooks/useSettings'
 import { useToast } from '@/hooks/useToast'
 import { generateDeploymentName } from '@/lib/utils'
 import { type Model } from '@/lib/api'
@@ -23,11 +24,12 @@ export function DeploymentForm({ model }: DeploymentFormProps) {
   const navigate = useNavigate()
   const { toast } = useToast()
   const createDeployment = useCreateDeployment()
+  const { data: settings } = useSettings()
 
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [config, setConfig] = useState<DeploymentConfig>({
     name: generateDeploymentName(model.id),
-    namespace: import.meta.env.VITE_DEFAULT_NAMESPACE || 'kubefoundry',
+    namespace: '',
     modelId: model.id,
     engine: model.supportedEngines[0] || 'vllm',
     mode: 'aggregated',
@@ -38,6 +40,16 @@ export function DeploymentForm({ model }: DeploymentFormProps) {
     enablePrefixCaching: false,
     trustRemoteCode: false,
   })
+
+  // Set namespace from active provider when settings load
+  useEffect(() => {
+    if (settings?.activeProvider?.defaultNamespace && !config.namespace) {
+      setConfig(prev => ({
+        ...prev,
+        namespace: settings.activeProvider?.defaultNamespace || 'default'
+      }))
+    }
+  }, [settings?.activeProvider?.defaultNamespace])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -96,7 +108,7 @@ export function DeploymentForm({ model }: DeploymentFormProps) {
                 id="namespace"
                 value={config.namespace}
                 onChange={(e) => updateConfig('namespace', e.target.value)}
-                placeholder="kubefoundry"
+                placeholder={settings?.activeProvider?.defaultNamespace || 'default'}
                 required
               />
             </div>
