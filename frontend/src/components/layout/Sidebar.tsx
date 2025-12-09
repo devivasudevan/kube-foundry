@@ -16,7 +16,7 @@ export function Sidebar() {
   const providerId = settings?.activeProvider?.id || 'dynamo'
 
   return (
-    <div className="flex h-full w-64 flex-col border-r bg-card">
+    <div className="flex h-full w-64 flex-col border-r bg-card overflow-hidden">
       <div className="flex h-16 items-center border-b px-6">
         <Link to="/" className="flex items-center gap-2">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold">

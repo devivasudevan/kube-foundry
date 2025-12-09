@@ -53,6 +53,11 @@
   * {
     @apply border-border;
   }
+  html,
+  body,
+  #root {
+    @apply h-full overflow-hidden;
+  }
   body {
     @apply bg-background text-foreground;
   }
