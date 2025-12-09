@@ -63,7 +63,7 @@ All inference runtime logic is encapsulated in provider implementations:
 | Installation System | ✅ Complete |
 | Model Catalog | ✅ Complete |
 | Deployment Management | ✅ Complete |
-| KubeRay Provider | 🔜 Planned |
+| KubeRay Provider | ✅ Complete |
 
 ## Important Files
 

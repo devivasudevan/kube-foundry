@@ -34,6 +34,12 @@ export interface DeploymentConfig {
     memory?: string
   }
   engineArgs?: Record<string, unknown>
+
+  // Disaggregated mode configuration (P/D separation)
+  prefillReplicas?: number
+  decodeReplicas?: number
+  prefillGpus?: number
+  decodeGpus?: number
 }
 
 export interface PodStatus {
@@ -59,6 +65,16 @@ export interface DeploymentStatus {
   pods: PodStatus[]
   createdAt: string
   frontendService?: string
+
+  // Disaggregated mode status (P/D separation)
+  prefillReplicas?: {
+    desired: number
+    ready: number
+  }
+  decodeReplicas?: {
+    desired: number
+    ready: number
+  }
 }
 
 export interface ClusterStatus {

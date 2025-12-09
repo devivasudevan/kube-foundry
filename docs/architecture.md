@@ -52,7 +52,7 @@ interface Provider {
 | Provider | CRD | Status |
 |----------|-----|--------|
 | NVIDIA Dynamo | DynamoGraphDeployment | ✅ Available |
-| KubeRay | RayCluster | 🔜 Planned |
+| KubeRay | RayService | ✅ Available |
 
 ## Data Models
 

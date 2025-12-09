@@ -19,6 +19,7 @@ interface DeploymentFormProps {
 
 type Engine = 'vllm' | 'sglang' | 'trtllm'
 type RouterMode = 'none' | 'kv' | 'round-robin'
+type DeploymentMode = 'aggregated' | 'disaggregated'
 
 export function DeploymentForm({ model }: DeploymentFormProps) {
   const navigate = useNavigate()
@@ -39,6 +40,11 @@ export function DeploymentForm({ model }: DeploymentFormProps) {
     enforceEager: true,
     enablePrefixCaching: false,
     trustRemoteCode: false,
+    // Disaggregated mode defaults
+    prefillReplicas: 1,
+    decodeReplicas: 1,
+    prefillGpus: 1,
+    decodeGpus: 1,
   })
 
   // Set namespace from active provider when settings load
@@ -155,50 +161,151 @@ export function DeploymentForm({ model }: DeploymentFormProps) {
         </CardContent>
       </Card>
 
+      {/* Deployment Mode */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Deployment Mode</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <RadioGroup
+            value={config.mode}
+            onValueChange={(value) => updateConfig('mode', value as DeploymentMode)}
+            className="grid gap-4 sm:grid-cols-2"
+          >
+            <div className="flex items-start space-x-2">
+              <RadioGroupItem value="aggregated" id="mode-aggregated" className="mt-1" />
+              <div>
+                <Label htmlFor="mode-aggregated" className="cursor-pointer font-medium">
+                  Aggregated (Standard)
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Combined prefill and decode on same workers
+                </p>
+              </div>
+            </div>
+            <div className="flex items-start space-x-2">
+              <RadioGroupItem value="disaggregated" id="mode-disaggregated" className="mt-1" />
+              <div>
+                <Label htmlFor="mode-disaggregated" className="cursor-pointer font-medium">
+                  Disaggregated (P/D)
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Separate prefill and decode workers for better resource utilization
+                </p>
+              </div>
+            </div>
+          </RadioGroup>
+        </CardContent>
+      </Card>
+
       {/* Deployment Options */}
       <Card>
         <CardHeader>
           <CardTitle>Deployment Options</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="replicas">Worker Replicas</Label>
-              <Input
-                id="replicas"
-                type="number"
-                min={1}
-                max={10}
-                value={config.replicas}
-                onChange={(e) => updateConfig('replicas', parseInt(e.target.value) || 1)}
-              />
-            </div>
-
-            {/* Router Mode is only applicable to Dynamo provider */}
-            {settings?.activeProvider?.id === 'dynamo' && (
+          {config.mode === 'aggregated' ? (
+            /* Aggregated mode: single replica count */
+            <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
-                <Label>Router Mode</Label>
-                <RadioGroup
-                  value={config.routerMode}
-                  onValueChange={(value) => updateConfig('routerMode', value as RouterMode)}
-                  className="flex gap-4"
-                >
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="none" id="router-none" />
-                    <Label htmlFor="router-none" className="cursor-pointer">None</Label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="kv" id="router-kv" />
-                    <Label htmlFor="router-kv" className="cursor-pointer">KV-Aware</Label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="round-robin" id="router-rr" />
-                    <Label htmlFor="router-rr" className="cursor-pointer">Round Robin</Label>
-                  </div>
-                </RadioGroup>
+                <Label htmlFor="replicas">Worker Replicas</Label>
+                <Input
+                  id="replicas"
+                  type="number"
+                  min={1}
+                  max={10}
+                  value={config.replicas}
+                  onChange={(e) => updateConfig('replicas', parseInt(e.target.value) || 1)}
+                />
               </div>
-            )}
-          </div>
+
+              {/* Router Mode is only applicable to Dynamo provider */}
+              {settings?.activeProvider?.id === 'dynamo' && (
+                <div className="space-y-2">
+                  <Label>Router Mode</Label>
+                  <RadioGroup
+                    value={config.routerMode}
+                    onValueChange={(value) => updateConfig('routerMode', value as RouterMode)}
+                    className="flex gap-4"
+                  >
+                    <div className="flex items-center space-x-2">
+                      <RadioGroupItem value="none" id="router-none" />
+                      <Label htmlFor="router-none" className="cursor-pointer">None</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <RadioGroupItem value="kv" id="router-kv" />
+                      <Label htmlFor="router-kv" className="cursor-pointer">KV-Aware</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <RadioGroupItem value="round-robin" id="router-rr" />
+                      <Label htmlFor="router-rr" className="cursor-pointer">Round Robin</Label>
+                    </div>
+                  </RadioGroup>
+                </div>
+              )}
+            </div>
+          ) : (
+            /* Disaggregated mode: separate prefill/decode configuration */
+            <div className="space-y-6">
+              {/* Prefill Workers */}
+              <div className="space-y-3">
+                <h4 className="font-medium text-sm">Prefill Workers</h4>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="prefillReplicas">Replicas</Label>
+                    <Input
+                      id="prefillReplicas"
+                      type="number"
+                      min={1}
+                      max={10}
+                      value={config.prefillReplicas || 1}
+                      onChange={(e) => updateConfig('prefillReplicas', parseInt(e.target.value) || 1)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="prefillGpus">GPUs per Worker</Label>
+                    <Input
+                      id="prefillGpus"
+                      type="number"
+                      min={1}
+                      max={8}
+                      value={config.prefillGpus || 1}
+                      onChange={(e) => updateConfig('prefillGpus', parseInt(e.target.value) || 1)}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Decode Workers */}
+              <div className="space-y-3">
+                <h4 className="font-medium text-sm">Decode Workers</h4>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="decodeReplicas">Replicas</Label>
+                    <Input
+                      id="decodeReplicas"
+                      type="number"
+                      min={1}
+                      max={10}
+                      value={config.decodeReplicas || 1}
+                      onChange={(e) => updateConfig('decodeReplicas', parseInt(e.target.value) || 1)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="decodeGpus">GPUs per Worker</Label>
+                    <Input
+                      id="decodeGpus"
+                      type="number"
+                      min={1}
+                      max={8}
+                      value={config.decodeGpus || 1}
+                      onChange={(e) => updateConfig('decodeGpus', parseInt(e.target.value) || 1)}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 

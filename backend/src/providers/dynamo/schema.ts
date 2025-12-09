@@ -6,8 +6,11 @@ import { baseDeploymentConfigSchema } from '../types';
  * Extends the base schema with Dynamo-specific validation
  */
 export const dynamoDeploymentConfigSchema = baseDeploymentConfigSchema.extend({
-  // Dynamo-specific fields can be added here
-  // For now, we use the base schema as Dynamo was the original implementation
+  // Dynamo supports all engines: vllm, sglang, trtllm
+  // Each has different disaggregation flags:
+  // - vllm: --is-prefill-worker for prefill workers
+  // - sglang: --disaggregation-mode prefill|decode
+  // - trtllm: --disaggregation-mode prefill|decode
 });
 
 export type DynamoDeploymentConfig = z.infer<typeof dynamoDeploymentConfigSchema>;

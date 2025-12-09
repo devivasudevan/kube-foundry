@@ -1,7 +1,7 @@
 import * as k8s from '@kubernetes/client-node';
 import type { DeploymentConfig, DeploymentStatus, DeploymentPhase } from '@kubefoundry/shared';
 import type { Provider, CRDConfig, HelmRepo, HelmChart, InstallationStatus, InstallationStep } from '../types';
-import { dynamoDeploymentConfigSchema } from './schema';
+import { dynamoDeploymentConfigSchema, type DynamoDeploymentConfig } from './schema';
 
 /**
  * NVIDIA Dynamo Provider
@@ -29,6 +29,18 @@ export class DynamoProvider implements Provider {
   }
 
   generateManifest(config: DeploymentConfig): Record<string, unknown> {
+    const dynamoConfig = config as DynamoDeploymentConfig;
+
+    if (dynamoConfig.mode === 'disaggregated') {
+      return this.generateDisaggregatedManifest(dynamoConfig);
+    }
+    return this.generateAggregatedManifest(dynamoConfig);
+  }
+
+  /**
+   * Generate manifest for aggregated (standard) serving mode
+   */
+  private generateAggregatedManifest(config: DynamoDeploymentConfig): Record<string, unknown> {
     const workerSpec = this.generateWorkerSpec(config);
     const frontendSpec = this.generateFrontendSpec(config);
 
@@ -51,20 +63,54 @@ export class DynamoProvider implements Provider {
     };
   }
 
-  private generateFrontendSpec(config: DeploymentConfig): Record<string, unknown> {
+  /**
+   * Generate manifest for disaggregated (P/D) serving mode
+   * Creates separate prefill and decode workers with engine-specific flags
+   */
+  private generateDisaggregatedManifest(config: DynamoDeploymentConfig): Record<string, unknown> {
+    const frontendSpec = this.generateFrontendSpec(config);
+    const prefillWorkerSpec = this.generateDisaggregatedWorkerSpec(config, 'prefill');
+    const decodeWorkerSpec = this.generateDisaggregatedWorkerSpec(config, 'decode');
+
+    return {
+      apiVersion: `${DynamoProvider.API_GROUP}/${DynamoProvider.API_VERSION}`,
+      kind: DynamoProvider.CRD_KIND,
+      metadata: {
+        name: config.name,
+        namespace: config.namespace,
+        labels: {
+          'app.kubernetes.io/name': 'kubefoundry',
+          'app.kubernetes.io/instance': config.name,
+          'app.kubernetes.io/managed-by': 'kubefoundry',
+        },
+      },
+      spec: {
+        Frontend: frontendSpec,
+        ...prefillWorkerSpec,
+        ...decodeWorkerSpec,
+      },
+    };
+  }
+
+  private generateFrontendSpec(config: DynamoDeploymentConfig): Record<string, unknown> {
     const spec: Record<string, unknown> = {
       replicas: 1,
       'http-port': 8000,
     };
 
-    if (config.routerMode !== 'none') {
-      spec['router-mode'] = config.routerMode;
+    // Use round-robin router for disaggregated mode if not specified
+    const routerMode = config.mode === 'disaggregated' && config.routerMode === 'none' 
+      ? 'round-robin' 
+      : config.routerMode;
+
+    if (routerMode !== 'none') {
+      spec['router-mode'] = routerMode;
     }
 
     return spec;
   }
 
-  private generateWorkerSpec(config: DeploymentConfig): Record<string, unknown> {
+  private generateWorkerSpec(config: DynamoDeploymentConfig): Record<string, unknown> {
     const baseSpec: Record<string, unknown> = {
       'model-path': config.modelId,
       'served-model-name': config.servedModelName || config.modelId,
@@ -125,6 +171,91 @@ export class DynamoProvider implements Provider {
     }
   }
 
+  /**
+   * Generate worker spec for disaggregated mode (prefill or decode)
+   * Each engine has different flags for disaggregation:
+   * - vllm: --is-prefill-worker for prefill workers (decode has no flag)
+   * - sglang: --disaggregation-mode prefill|decode
+   * - trtllm: --disaggregation-mode prefill|decode
+   */
+  private generateDisaggregatedWorkerSpec(
+    config: DynamoDeploymentConfig,
+    role: 'prefill' | 'decode'
+  ): Record<string, unknown> {
+    const isPrefill = role === 'prefill';
+    const replicas = isPrefill ? (config.prefillReplicas || 1) : (config.decodeReplicas || 1);
+    const gpus = isPrefill ? (config.prefillGpus || 1) : (config.decodeGpus || 1);
+
+    const baseSpec: Record<string, unknown> = {
+      'model-path': config.modelId,
+      'served-model-name': config.servedModelName || config.modelId,
+      replicas,
+      envFrom: [
+        {
+          secretRef: {
+            name: config.hfTokenSecret,
+          },
+        },
+      ],
+      resources: {
+        limits: {
+          'nvidia.com/gpu': gpus,
+          ...(config.resources?.memory && { memory: config.resources.memory }),
+        },
+      },
+    };
+
+    // Add common options
+    if (config.enforceEager) {
+      baseSpec['enforce-eager'] = true;
+    }
+
+    if (config.enablePrefixCaching) {
+      baseSpec['enable-prefix-caching'] = true;
+    }
+
+    if (config.trustRemoteCode) {
+      baseSpec['trust-remote-code'] = true;
+    }
+
+    if (config.contextLength) {
+      baseSpec['max-model-len'] = config.contextLength;
+    }
+
+    // Add engine-specific arguments
+    if (config.engineArgs) {
+      Object.entries(config.engineArgs).forEach(([key, value]) => {
+        baseSpec[key] = value;
+      });
+    }
+
+    // Add engine-specific disaggregation flags
+    switch (config.engine) {
+      case 'vllm':
+        // vLLM uses --is-prefill-worker flag for prefill workers only
+        if (isPrefill) {
+          baseSpec['is-prefill-worker'] = true;
+        }
+        return { [`Vllm${isPrefill ? 'Prefill' : 'Decode'}Worker`]: baseSpec };
+
+      case 'sglang':
+        // SGLang uses --disaggregation-mode prefill|decode
+        baseSpec['disaggregation-mode'] = role;
+        return { [`Sglang${isPrefill ? 'Prefill' : 'Decode'}Worker`]: baseSpec };
+
+      case 'trtllm':
+        // TRT-LLM uses --disaggregation-mode prefill|decode
+        baseSpec['disaggregation-mode'] = role;
+        return { [`Trtllm${isPrefill ? 'Prefill' : 'Decode'}Worker`]: baseSpec };
+
+      default:
+        if (isPrefill) {
+          baseSpec['is-prefill-worker'] = true;
+        }
+        return { [`Vllm${isPrefill ? 'Prefill' : 'Decode'}Worker`]: baseSpec };
+    }
+  }
+
   parseStatus(raw: unknown): DeploymentStatus {
     const obj = raw as {
       metadata?: { name?: string; namespace?: string; creationTimestamp?: string };
@@ -132,11 +263,21 @@ export class DynamoProvider implements Provider {
         VllmWorker?: { 'model-path'?: string; replicas?: number };
         SglangWorker?: { 'model-path'?: string; replicas?: number };
         TrtllmWorker?: { 'model-path'?: string; replicas?: number };
+        // Disaggregated worker types
+        VllmPrefillWorker?: { 'model-path'?: string; replicas?: number };
+        VllmDecodeWorker?: { 'model-path'?: string; replicas?: number };
+        SglangPrefillWorker?: { 'model-path'?: string; replicas?: number };
+        SglangDecodeWorker?: { 'model-path'?: string; replicas?: number };
+        TrtllmPrefillWorker?: { 'model-path'?: string; replicas?: number };
+        TrtllmDecodeWorker?: { 'model-path'?: string; replicas?: number };
         Frontend?: { replicas?: number };
       };
       status?: {
         phase?: string;
         replicas?: { ready?: number; available?: number; desired?: number };
+        // Disaggregated status (if supported by operator)
+        prefillReplicas?: { ready?: number; desired?: number };
+        decodeReplicas?: { ready?: number; desired?: number };
         conditions?: Array<{
           type?: string;
           status?: string;
@@ -150,12 +291,38 @@ export class DynamoProvider implements Provider {
     const spec = obj.spec || {};
     const status = obj.status || {};
 
-    // Determine engine from spec
+    // Determine engine and mode from spec
     let engine: 'vllm' | 'sglang' | 'trtllm' = 'vllm';
     let modelId = '';
     let desiredReplicas = 1;
+    let mode: 'aggregated' | 'disaggregated' = 'aggregated';
 
-    if (spec.VllmWorker) {
+    // Check for disaggregated workers first
+    let prefillDesired = 0;
+    let decodeDesired = 0;
+
+    if (spec.VllmPrefillWorker || spec.VllmDecodeWorker) {
+      engine = 'vllm';
+      mode = 'disaggregated';
+      modelId = spec.VllmPrefillWorker?.['model-path'] || spec.VllmDecodeWorker?.['model-path'] || '';
+      prefillDesired = spec.VllmPrefillWorker?.replicas || 0;
+      decodeDesired = spec.VllmDecodeWorker?.replicas || 0;
+      desiredReplicas = prefillDesired + decodeDesired;
+    } else if (spec.SglangPrefillWorker || spec.SglangDecodeWorker) {
+      engine = 'sglang';
+      mode = 'disaggregated';
+      modelId = spec.SglangPrefillWorker?.['model-path'] || spec.SglangDecodeWorker?.['model-path'] || '';
+      prefillDesired = spec.SglangPrefillWorker?.replicas || 0;
+      decodeDesired = spec.SglangDecodeWorker?.replicas || 0;
+      desiredReplicas = prefillDesired + decodeDesired;
+    } else if (spec.TrtllmPrefillWorker || spec.TrtllmDecodeWorker) {
+      engine = 'trtllm';
+      mode = 'disaggregated';
+      modelId = spec.TrtllmPrefillWorker?.['model-path'] || spec.TrtllmDecodeWorker?.['model-path'] || '';
+      prefillDesired = spec.TrtllmPrefillWorker?.replicas || 0;
+      decodeDesired = spec.TrtllmDecodeWorker?.replicas || 0;
+      desiredReplicas = prefillDesired + decodeDesired;
+    } else if (spec.VllmWorker) {
       engine = 'vllm';
       modelId = spec.VllmWorker['model-path'] || '';
       desiredReplicas = spec.VllmWorker.replicas || 1;
@@ -169,12 +336,12 @@ export class DynamoProvider implements Provider {
       desiredReplicas = spec.TrtllmWorker.replicas || 1;
     }
 
-    return {
+    const result: DeploymentStatus = {
       name: obj.metadata?.name || 'unknown',
       namespace: obj.metadata?.namespace || 'default',
       modelId,
       engine,
-      mode: 'aggregated',
+      mode,
       phase: (status.phase as DeploymentPhase) || 'Pending',
       replicas: {
         desired: status.replicas?.desired || desiredReplicas,
@@ -192,6 +359,20 @@ export class DynamoProvider implements Provider {
       createdAt: obj.metadata?.creationTimestamp || new Date().toISOString(),
       frontendService: `${obj.metadata?.name}-frontend`,
     };
+
+    // Add disaggregated replica status if in disaggregated mode
+    if (mode === 'disaggregated') {
+      result.prefillReplicas = {
+        desired: status.prefillReplicas?.desired || prefillDesired,
+        ready: status.prefillReplicas?.ready || 0,
+      };
+      result.decodeReplicas = {
+        desired: status.decodeReplicas?.desired || decodeDesired,
+        ready: status.decodeReplicas?.ready || 0,
+      };
+    }
+
+    return result;
   }
 
   validateConfig(config: unknown): { valid: boolean; errors: string[]; data?: DeploymentConfig } {

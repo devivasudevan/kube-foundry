@@ -20,6 +20,22 @@ interface DeploymentListProps {
   deployments: DeploymentStatus[]
 }
 
+/**
+ * Format replica status for display
+ * For disaggregated mode, shows "P: x/y, D: x/y" format
+ * For aggregated mode, shows "x/y" format
+ */
+function formatReplicaStatus(deployment: DeploymentStatus): string {
+  if (deployment.mode === 'disaggregated' && deployment.prefillReplicas && deployment.decodeReplicas) {
+    const pReady = deployment.prefillReplicas.ready
+    const pDesired = deployment.prefillReplicas.desired
+    const dReady = deployment.decodeReplicas.ready
+    const dDesired = deployment.decodeReplicas.desired
+    return `P: ${pReady}/${pDesired}, D: ${dReady}/${dDesired}`
+  }
+  return `${deployment.replicas.ready}/${deployment.replicas.desired}`
+}
+
 export function DeploymentList({ deployments }: DeploymentListProps) {
   const { toast } = useToast()
   const deleteDeployment = useDeleteDeployment()
@@ -99,9 +115,12 @@ export function DeploymentList({ deployments }: DeploymentListProps) {
                   <DeploymentStatusBadge phase={deployment.phase} />
                 </td>
                 <td className="px-4 py-3">
-                  <span className="text-sm">
-                    {deployment.replicas.ready}/{deployment.replicas.desired}
+                  <span className="text-sm" title={deployment.mode === 'disaggregated' ? 'Prefill / Decode replicas' : 'Worker replicas'}>
+                    {formatReplicaStatus(deployment)}
                   </span>
+                  {deployment.mode === 'disaggregated' && (
+                    <Badge variant="secondary" className="ml-2 text-xs">P/D</Badge>
+                  )}
                 </td>
                 <td className="px-4 py-3">
                   <span className="text-sm text-muted-foreground">

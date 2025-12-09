@@ -13,7 +13,7 @@ export interface DeploymentConfig {
   mode: DeploymentMode;
   servedModelName?: string;      // Custom model name for API
   routerMode: RouterMode;
-  replicas: number;              // Number of worker replicas
+  replicas: number;              // Number of worker replicas (aggregated mode)
   hfTokenSecret: string;         // K8s secret name for HF_TOKEN
   contextLength?: number;        // Optional context length override
   enforceEager: boolean;         // Enforce eager mode for quick deployment
@@ -24,6 +24,12 @@ export interface DeploymentConfig {
     memory?: string;             // Memory limit
   };
   engineArgs?: Record<string, unknown>;  // Engine-specific arguments
+
+  // Disaggregated mode configuration (P/D separation)
+  prefillReplicas?: number;      // Number of prefill worker replicas
+  decodeReplicas?: number;       // Number of decode worker replicas
+  prefillGpus?: number;          // GPUs per prefill worker
+  decodeGpus?: number;           // GPUs per decode worker
 }
 
 export interface PodStatus {
@@ -58,6 +64,16 @@ export interface DeploymentStatus {
   pods: PodStatus[];
   createdAt: string;
   frontendService?: string;      // Service name for port-forwarding
+
+  // Disaggregated mode status (P/D separation)
+  prefillReplicas?: {
+    desired: number;
+    ready: number;
+  };
+  decodeReplicas?: {
+    desired: number;
+    ready: number;
+  };
 }
 
 export interface CreateDeploymentRequest {

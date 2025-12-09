@@ -115,6 +115,12 @@ export class KubeRayProvider implements Provider {
   private generateDisaggregatedManifest(config: KubeRayDeploymentConfig): Record<string, unknown> {
     const kvConnector = config.kvConnector || 'NixlConnector';
 
+    // Use per-component replica/GPU settings if specified, otherwise fall back to defaults
+    const prefillReplicas = config.prefillReplicas || 1;
+    const decodeReplicas = config.decodeReplicas || 1;
+    const prefillGpus = config.prefillGpus || config.resources?.gpu || 1;
+    const decodeGpus = config.decodeGpus || config.resources?.gpu || 1;
+
     const serveConfig = {
       applications: [
         {
@@ -129,8 +135,8 @@ export class KubeRayProvider implements Provider {
               },
               deployment_config: {
                 autoscaling_config: {
-                  min_replicas: config.minReplicas || 1,
-                  max_replicas: config.maxReplicas || 2,
+                  min_replicas: config.prefillMinReplicas || config.minReplicas || 1,
+                  max_replicas: config.prefillMaxReplicas || config.maxReplicas || 2,
                 },
                 ray_actor_options: {
                   resources: {
@@ -147,10 +153,10 @@ export class KubeRayProvider implements Provider {
                 enable_chunked_prefill: config.enableChunkedPrefill ?? true,
                 enable_prefix_caching: config.enablePrefixCaching ?? true,
                 enforce_eager: config.enforceEager ?? true,
-              },
-              kv_transfer_config: {
-                kv_connector: kvConnector,
-                kv_role: 'kv_producer',
+                kv_transfer_config: {
+                  kv_connector: kvConnector,
+                  kv_role: 'kv_producer',
+                },
               },
             },
             decode_config: {
@@ -160,8 +166,8 @@ export class KubeRayProvider implements Provider {
               },
               deployment_config: {
                 autoscaling_config: {
-                  min_replicas: config.minReplicas || 1,
-                  max_replicas: config.maxReplicas || 2,
+                  min_replicas: config.decodeMinReplicas || config.minReplicas || 1,
+                  max_replicas: config.decodeMaxReplicas || config.maxReplicas || 2,
                 },
                 ray_actor_options: {
                   resources: {
@@ -178,10 +184,10 @@ export class KubeRayProvider implements Provider {
                 enable_chunked_prefill: config.enableChunkedPrefill ?? true,
                 enable_prefix_caching: config.enablePrefixCaching ?? true,
                 enforce_eager: config.enforceEager ?? true,
-              },
-              kv_transfer_config: {
-                kv_connector: kvConnector,
-                kv_role: 'kv_consumer',
+                kv_transfer_config: {
+                  kv_connector: kvConnector,
+                  kv_role: 'kv_consumer',
+                },
               },
             },
           },
@@ -206,8 +212,8 @@ export class KubeRayProvider implements Provider {
         rayClusterConfig: {
           headGroupSpec: this.generateHeadGroupSpec(config),
           workerGroupSpecs: [
-            this.generatePrefillWorkerSpec(config),
-            this.generateDecodeWorkerSpec(config),
+            this.generatePrefillWorkerSpec(config, prefillReplicas, prefillGpus),
+            this.generateDecodeWorkerSpec(config, decodeReplicas, decodeGpus),
           ],
         },
       },
@@ -296,8 +302,8 @@ export class KubeRayProvider implements Provider {
     };
   }
 
-  private generatePrefillWorkerSpec(config: KubeRayDeploymentConfig): Record<string, unknown> {
-    const baseSpec = this.generateWorkerGroupSpec(config, 'prefill-group');
+  private generatePrefillWorkerSpec(config: KubeRayDeploymentConfig, replicas: number, gpuCount: number): Record<string, unknown> {
+    const baseSpec = this.generateWorkerGroupSpecWithParams(config, 'prefill-group', replicas, gpuCount);
     // Add prefill_node resource label
     (baseSpec as { rayStartParams: Record<string, string> }).rayStartParams = {
       resources: '"{\\\"prefill_node\\\": 1}"',
@@ -305,13 +311,73 @@ export class KubeRayProvider implements Provider {
     return baseSpec;
   }
 
-  private generateDecodeWorkerSpec(config: KubeRayDeploymentConfig): Record<string, unknown> {
-    const baseSpec = this.generateWorkerGroupSpec(config, 'decode-group');
+  private generateDecodeWorkerSpec(config: KubeRayDeploymentConfig, replicas: number, gpuCount: number): Record<string, unknown> {
+    const baseSpec = this.generateWorkerGroupSpecWithParams(config, 'decode-group', replicas, gpuCount);
     // Add decode_node resource label
     (baseSpec as { rayStartParams: Record<string, string> }).rayStartParams = {
       resources: '"{\\\"decode_node\\\": 1}"',
     };
     return baseSpec;
+  }
+
+  private generateWorkerGroupSpecWithParams(
+    config: KubeRayDeploymentConfig,
+    groupName: string,
+    replicas: number,
+    gpuCount: number
+  ): Record<string, unknown> {
+    const rayImage = config.rayImage || 'rayproject/ray-llm:2.52.0-py311-cu128';
+    const workerCpu = config.workerCpu || '8';
+    const workerMemory = config.workerMemory || '64Gi';
+
+    // Use per-component min/max replicas
+    let minReplicas: number;
+    let maxReplicas: number;
+
+    if (groupName === 'prefill-group') {
+      minReplicas = config.prefillMinReplicas || config.minReplicas || 1;
+      maxReplicas = config.prefillMaxReplicas || config.maxReplicas || 2;
+    } else {
+      minReplicas = config.decodeMinReplicas || config.minReplicas || 1;
+      maxReplicas = config.decodeMaxReplicas || config.maxReplicas || 2;
+    }
+
+    return {
+      groupName,
+      replicas,
+      minReplicas,
+      maxReplicas,
+      rayStartParams: {},
+      template: {
+        spec: {
+          containers: [
+            {
+              name: 'ray-worker',
+              image: rayImage,
+              resources: {
+                limits: {
+                  cpu: workerCpu,
+                  memory: workerMemory,
+                  'nvidia.com/gpu': String(gpuCount),
+                },
+                requests: {
+                  cpu: workerCpu,
+                  memory: workerMemory,
+                  'nvidia.com/gpu': String(gpuCount),
+                },
+              },
+            },
+          ],
+          tolerations: [
+            {
+              key: 'nvidia.com/gpu',
+              operator: 'Exists',
+              effect: 'NoSchedule',
+            },
+          ],
+        },
+      },
+    };
   }
 
   /**
@@ -362,6 +428,7 @@ export class KubeRayProvider implements Provider {
         serveConfigV2?: string;
         rayClusterConfig?: {
           workerGroupSpecs?: Array<{
+            groupName?: string;
             replicas?: number;
             minReplicas?: number;
             maxReplicas?: number;
@@ -417,6 +484,20 @@ export class KubeRayProvider implements Provider {
     const workerSpecs = spec.rayClusterConfig?.workerGroupSpecs || [];
     const desiredReplicas = workerSpecs.reduce((sum, w) => sum + (w.replicas || 0), 0);
 
+    // Extract prefill/decode replica counts for disaggregated mode
+    let prefillDesired = 0;
+    let decodeDesired = 0;
+
+    if (mode === 'disaggregated') {
+      for (const workerSpec of workerSpecs) {
+        if (workerSpec.groupName === 'prefill-group') {
+          prefillDesired = workerSpec.replicas || 0;
+        } else if (workerSpec.groupName === 'decode-group') {
+          decodeDesired = workerSpec.replicas || 0;
+        }
+      }
+    }
+
     // Map RayService status to DeploymentPhase
     let phase: DeploymentPhase = 'Pending';
     const serviceStatus = status.serviceStatus?.toLowerCase() || '';
@@ -429,7 +510,7 @@ export class KubeRayProvider implements Provider {
       phase = 'Deploying';
     }
 
-    return {
+    const result: DeploymentStatus = {
       name: obj.metadata?.name || 'unknown',
       namespace: obj.metadata?.namespace || 'default',
       modelId,
@@ -452,6 +533,26 @@ export class KubeRayProvider implements Provider {
       createdAt: obj.metadata?.creationTimestamp || new Date().toISOString(),
       frontendService: `${obj.metadata?.name}-serve-svc`,
     };
+
+    // Add disaggregated replica status if in disaggregated mode
+    if (mode === 'disaggregated') {
+      // Note: Ready counts would need to come from actual pod status
+      // For now, estimate based on available replicas ratio
+      const readyRatio = desiredReplicas > 0
+        ? (clusterStatus.availableWorkerReplicas || 0) / desiredReplicas
+        : 0;
+
+      result.prefillReplicas = {
+        desired: prefillDesired,
+        ready: Math.round(prefillDesired * readyRatio),
+      };
+      result.decodeReplicas = {
+        desired: decodeDesired,
+        ready: Math.round(decodeDesired * readyRatio),
+      };
+    }
+
+    return result;
   }
 
   validateConfig(config: unknown): { valid: boolean; errors: string[]; data?: DeploymentConfig } {

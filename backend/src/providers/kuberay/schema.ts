@@ -27,12 +27,18 @@ export const kuberayDeploymentConfigSchema = baseDeploymentConfigSchema.extend({
   workerCpu: z.string().default('8').describe('CPU cores for Ray worker nodes'),
   workerMemory: z.string().default('64Gi').describe('Memory for Ray worker nodes'),
 
-  // Autoscaling
+  // Autoscaling (used for aggregated mode or as defaults for disaggregated)
   minReplicas: z.number().int().min(1).default(1).describe('Minimum number of worker replicas'),
   maxReplicas: z.number().int().min(1).default(2).describe('Maximum number of worker replicas'),
 
   // Disaggregated mode settings (P/D disaggregation)
   kvConnector: z.enum(['NixlConnector', 'SimpleConnector']).default('NixlConnector').describe('KV cache connector type'),
+
+  // Per-component autoscaling for disaggregated mode
+  prefillMinReplicas: z.number().int().min(1).default(1).describe('Minimum prefill worker replicas'),
+  prefillMaxReplicas: z.number().int().min(1).default(2).describe('Maximum prefill worker replicas'),
+  decodeMinReplicas: z.number().int().min(1).default(1).describe('Minimum decode worker replicas'),
+  decodeMaxReplicas: z.number().int().min(1).default(2).describe('Maximum decode worker replicas'),
 });
 
 export type KubeRayDeploymentConfig = z.infer<typeof kuberayDeploymentConfigSchema>;

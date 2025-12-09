@@ -151,4 +151,10 @@ export const baseDeploymentConfigSchema = z.object({
     memory: z.string().optional(),
   }).optional(),
   engineArgs: z.record(z.unknown()).optional(),
+
+  // Disaggregated mode configuration (P/D separation)
+  prefillReplicas: z.number().int().min(1).max(10).default(1).describe('Number of prefill worker replicas'),
+  decodeReplicas: z.number().int().min(1).max(10).default(1).describe('Number of decode worker replicas'),
+  prefillGpus: z.number().int().min(1).default(1).describe('GPUs per prefill worker'),
+  decodeGpus: z.number().int().min(1).default(1).describe('GPUs per decode worker'),
 });
