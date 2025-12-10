@@ -2,6 +2,7 @@ import * as k8s from '@kubernetes/client-node';
 import type { DeploymentConfig, DeploymentStatus, DeploymentPhase, MetricDefinition, MetricsEndpointConfig } from '@kubefoundry/shared';
 import type { Provider, CRDConfig, HelmRepo, HelmChart, InstallationStatus, InstallationStep } from '../types';
 import { dynamoDeploymentConfigSchema, type DynamoDeploymentConfig } from './schema';
+import logger from '../../lib/logger';
 
 /**
  * NVIDIA Dynamo Provider
@@ -30,6 +31,8 @@ export class DynamoProvider implements Provider {
 
   generateManifest(config: DeploymentConfig): Record<string, unknown> {
     const dynamoConfig = config as DynamoDeploymentConfig;
+
+    logger.debug({ name: config.name, mode: dynamoConfig.mode, engine: dynamoConfig.engine }, 'Generating Dynamo manifest');
 
     if (dynamoConfig.mode === 'disaggregated') {
       return this.generateDisaggregatedManifest(dynamoConfig);
@@ -99,8 +102,8 @@ export class DynamoProvider implements Provider {
     };
 
     // Use round-robin router for disaggregated mode if not specified
-    const routerMode = config.mode === 'disaggregated' && config.routerMode === 'none' 
-      ? 'round-robin' 
+    const routerMode = config.mode === 'disaggregated' && config.routerMode === 'none'
+      ? 'round-robin'
       : config.routerMode;
 
     if (routerMode !== 'none') {
@@ -386,14 +389,17 @@ export class DynamoProvider implements Provider {
 
   validateConfig(config: unknown): { valid: boolean; errors: string[]; data?: DeploymentConfig } {
     const result = dynamoDeploymentConfigSchema.safeParse(config);
-    
+
     if (!result.success) {
+      const errors = result.error.errors.map(e => `${e.path.join('.')}: ${e.message}`);
+      logger.warn({ errors }, 'Dynamo config validation failed');
       return {
         valid: false,
-        errors: result.error.errors.map(e => `${e.path.join('.')}: ${e.message}`),
+        errors,
       };
     }
 
+    logger.debug({ name: result.data.name }, 'Dynamo config validated successfully');
     return {
       valid: true,
       errors: [],
@@ -457,6 +463,8 @@ export class DynamoProvider implements Provider {
     const customObjectsApi = k8sApi.customObjectsApi as k8s.CustomObjectsApi;
     const coreV1Api = k8sApi.coreV1Api as k8s.CoreV1Api;
 
+    logger.debug('Checking Dynamo installation status');
+
     try {
       // Check if CRD exists by trying to list resources
       let crdFound = false;
@@ -468,11 +476,13 @@ export class DynamoProvider implements Provider {
           DynamoProvider.CRD_PLURAL
         );
         crdFound = true;
+        logger.debug('Dynamo CRD found');
       } catch (error: unknown) {
         const k8sError = error as { response?: { statusCode?: number } };
         // 404 means CRD doesn't exist, other errors might be permissions
         if (k8sError?.response?.statusCode === 404) {
           crdFound = false;
+          logger.debug('Dynamo CRD not found');
         }
       }
 
@@ -496,6 +506,7 @@ export class DynamoProvider implements Provider {
       }
 
       const installed = crdFound && operatorRunning;
+      logger.info({ installed, crdFound, operatorRunning }, 'Dynamo installation check complete');
 
       return {
         installed,
@@ -508,6 +519,7 @@ export class DynamoProvider implements Provider {
           : 'Dynamo operator is not running',
       };
     } catch (error) {
+      logger.error({ error }, 'Error checking Dynamo installation');
       return {
         installed: false,
         message: `Error checking installation: ${error instanceof Error ? error.message : 'Unknown error'}`,

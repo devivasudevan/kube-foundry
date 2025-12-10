@@ -5,6 +5,7 @@ import { HTTPException } from 'hono/http-exception';
 import { configService } from '../services/config';
 import { authService } from '../services/auth';
 import { providerRegistry, listProviderInfo } from '../providers';
+import logger from '../lib/logger';
 
 const updateSettingsSchema = z.object({
   activeProviderId: z.string().optional(),
@@ -17,6 +18,7 @@ const providerIdParamsSchema = z.object({
 
 const settings = new Hono()
   .get('/', async (c) => {
+    logger.debug('Fetching settings');
     const config = await configService.getConfig();
     const providers = listProviderInfo();
     const activeProvider = providerRegistry.getProviderOrNull(config.activeProviderId);
@@ -39,13 +41,16 @@ const settings = new Hono()
   })
   .put('/', zValidator('json', updateSettingsSchema), async (c) => {
     const data = c.req.valid('json');
+    logger.info({ updates: data }, 'Updating settings');
 
     // Validate provider exists if being changed
     if (data.activeProviderId && !providerRegistry.hasProvider(data.activeProviderId)) {
+      logger.warn({ providerId: data.activeProviderId }, 'Invalid provider ID requested');
       throw new HTTPException(400, { message: `Invalid provider ID: ${data.activeProviderId}` });
     }
 
     const updatedConfig = await configService.setConfig(data);
+    logger.info({ config: updatedConfig }, 'Settings updated successfully');
 
     return c.json({
       message: 'Settings updated successfully',

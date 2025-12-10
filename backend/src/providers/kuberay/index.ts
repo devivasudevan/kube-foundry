@@ -2,6 +2,7 @@ import * as k8s from '@kubernetes/client-node';
 import type { DeploymentConfig, DeploymentStatus, DeploymentPhase, MetricDefinition, MetricsEndpointConfig } from '@kubefoundry/shared';
 import type { Provider, CRDConfig, HelmRepo, HelmChart, InstallationStatus, InstallationStep } from '../types';
 import { kuberayDeploymentConfigSchema, type KubeRayDeploymentConfig } from './schema';
+import logger from '../../lib/logger';
 
 /**
  * KubeRay Provider
@@ -31,6 +32,8 @@ export class KubeRayProvider implements Provider {
   generateManifest(config: DeploymentConfig): Record<string, unknown> {
     // Cast to KubeRay-specific config type
     const kuberayConfig = config as unknown as KubeRayDeploymentConfig;
+
+    logger.debug({ name: config.name, mode: kuberayConfig.mode }, 'Generating KubeRay manifest');
 
     if (kuberayConfig.mode === 'disaggregated') {
       return this.generateDisaggregatedManifest(kuberayConfig);
@@ -588,12 +591,15 @@ export class KubeRayProvider implements Provider {
     const result = kuberayDeploymentConfigSchema.safeParse(config);
 
     if (!result.success) {
+      const errors = result.error.errors.map(e => `${e.path.join('.')}: ${e.message}`);
+      logger.warn({ errors }, 'KubeRay config validation failed');
       return {
         valid: false,
-        errors: result.error.errors.map(e => `${e.path.join('.')}: ${e.message}`),
+        errors,
       };
     }
 
+    logger.debug({ name: result.data.name }, 'KubeRay config validated successfully');
     return {
       valid: true,
       errors: [],
@@ -653,6 +659,8 @@ export class KubeRayProvider implements Provider {
     const customObjectsApi = k8sApi.customObjectsApi as k8s.CustomObjectsApi;
     const coreV1Api = k8sApi.coreV1Api as k8s.CoreV1Api;
 
+    logger.debug('Checking KubeRay installation status');
+
     try {
       // Check if RayService CRD exists by trying to list resources
       let crdFound = false;
@@ -664,11 +672,13 @@ export class KubeRayProvider implements Provider {
           KubeRayProvider.CRD_PLURAL
         );
         crdFound = true;
+        logger.debug('KubeRay CRD found');
       } catch (error: unknown) {
         const k8sError = error as { response?: { statusCode?: number }; message?: string };
         // 404 means CRD doesn't exist
         if (k8sError?.response?.statusCode === 404 || k8sError?.message === 'HTTP request failed') {
           crdFound = false;
+          logger.debug('KubeRay CRD not found');
         }
       }
 
@@ -707,6 +717,7 @@ export class KubeRayProvider implements Provider {
       }
 
       const installed = crdFound && operatorRunning;
+      logger.info({ installed, crdFound, operatorRunning }, 'KubeRay installation check complete');
 
       return {
         installed,
@@ -719,6 +730,7 @@ export class KubeRayProvider implements Provider {
           : 'KubeRay operator is not running',
       };
     } catch (error) {
+      logger.error({ error }, 'Error checking KubeRay installation');
       return {
         installed: false,
         message: `Error checking installation: ${error instanceof Error ? error.message : 'Unknown error'}`,
