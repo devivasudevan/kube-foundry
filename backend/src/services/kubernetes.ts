@@ -1,7 +1,7 @@
 import * as k8s from '@kubernetes/client-node';
 import { configService } from './config';
 import { providerRegistry } from '../providers';
-import type { DeploymentStatus, PodStatus, ClusterStatus, PodPhase, DeploymentConfig } from '@kubefoundry/shared';
+import type { DeploymentStatus, PodStatus, ClusterStatus, PodPhase, DeploymentConfig, RuntimeStatus } from '@kubefoundry/shared';
 import type { InstallationStatus } from '../providers/types';
 import { withRetry, isK8sRetryableError } from '../lib/retry';
 import logger from '../lib/logger';
@@ -94,7 +94,85 @@ class KubernetesService {
   }
 
   async listDeployments(namespace: string, providerId?: string): Promise<DeploymentStatus[]> {
-    logger.debug({ namespace }, 'listDeployments called');
+    logger.debug({ namespace, providerId }, 'listDeployments called');
+
+    // If a specific provider is requested, only query that provider
+    if (providerId) {
+      return this.listDeploymentsForProvider(namespace, providerId);
+    }
+
+    // Query all providers and merge results
+    const allProviders = providerRegistry.listProviderIds();
+    const allDeployments: DeploymentStatus[] = [];
+
+    // Query each provider in parallel
+    const results = await Promise.all(
+      allProviders.map(pid => this.listDeploymentsForProvider(namespace, pid))
+    );
+
+    for (const deployments of results) {
+      allDeployments.push(...deployments);
+    }
+
+    // Sort by creation time (newest first)
+    allDeployments.sort((a, b) => {
+      const dateA = new Date(a.createdAt).getTime();
+      const dateB = new Date(b.createdAt).getTime();
+      return dateB - dateA;
+    });
+
+    logger.debug({ count: allDeployments.length }, 'Found total deployments across all providers');
+    return allDeployments;
+  }
+
+  /**
+   * List deployments for a specific provider
+   */
+  private async listDeploymentsForProvider(namespace: string, providerId: string): Promise<DeploymentStatus[]> {
+    const provider = providerRegistry.getProvider(providerId);
+    const crdConfig = provider.getCRDConfig();
+
+    try {
+      logger.debug(
+        { providerId, apiGroup: crdConfig.apiGroup, apiVersion: crdConfig.apiVersion, plural: crdConfig.plural },
+        'Calling listNamespacedCustomObject'
+      );
+
+      const response = await withRetry(
+        () => this.customObjectsApi.listNamespacedCustomObject(
+          crdConfig.apiGroup,
+          crdConfig.apiVersion,
+          namespace,
+          crdConfig.plural
+        ),
+        { operationName: `listDeployments:${providerId}` }
+      );
+
+      logger.debug({ statusCode: response.response.statusCode }, 'listNamespacedCustomObject success');
+
+      const items = (response.body as { items?: unknown[] }).items || [];
+      logger.debug({ count: items.length, providerId }, 'Found deployments for provider');
+      return items.map((item) => provider.parseStatus(item));
+    } catch (error: any) {
+      // Check for CRD not found (404) or permission denied (403)
+      const statusCode = error?.statusCode || error?.response?.statusCode;
+      if (error?.message === 'HTTP request failed' || statusCode === 404 || statusCode === 403) {
+        // This is expected when the provider CRD is not installed - don't log as error
+        logger.debug({ namespace, providerId }, 'CRD not found in namespace (provider may not be installed)');
+        return [];
+      }
+
+      // Log unexpected errors
+      logger.error({ error: error?.message || error, providerId }, 'Unexpected error listing deployments');
+      return [];
+    }
+  }
+
+  /**
+   * @deprecated Use listDeployments without providerId to get all deployments
+   */
+  async listDeploymentsLegacy(namespace: string, providerId?: string): Promise<DeploymentStatus[]> {
+    logger.debug({ namespace }, 'listDeploymentsLegacy called');
 
     // Get the provider (use specified or active provider)
     const activeProviderId = providerId || await configService.getActiveProviderId();
@@ -138,10 +216,30 @@ class KubernetesService {
   }
 
   async getDeployment(name: string, namespace: string, providerId?: string): Promise<DeploymentStatus | null> {
+    // If provider is specified, only check that provider
+    if (providerId) {
+      return this.getDeploymentFromProvider(name, namespace, providerId);
+    }
+
+    // Try all providers until we find the deployment
+    const allProviders = providerRegistry.listProviderIds();
+    for (const pid of allProviders) {
+      const deployment = await this.getDeploymentFromProvider(name, namespace, pid);
+      if (deployment) {
+        return deployment;
+      }
+    }
+
+    logger.debug({ name, namespace }, 'Deployment not found in any provider');
+    return null;
+  }
+
+  /**
+   * Get a deployment from a specific provider
+   */
+  private async getDeploymentFromProvider(name: string, namespace: string, providerId: string): Promise<DeploymentStatus | null> {
     try {
-      // Get the provider
-      const activeProviderId = providerId || await configService.getActiveProviderId();
-      const provider = providerRegistry.getProvider(activeProviderId);
+      const provider = providerRegistry.getProvider(providerId);
       const crdConfig = provider.getCRDConfig();
 
       const response = await withRetry(
@@ -152,24 +250,36 @@ class KubernetesService {
           crdConfig.plural,
           name
         ),
-        { operationName: 'getDeployment' }
+        { operationName: `getDeployment:${providerId}` }
       );
 
       return provider.parseStatus(response.body);
-    } catch (error) {
-      logger.error({ error, name, namespace }, 'Error getting deployment');
+    } catch (error: any) {
+      const statusCode = error?.statusCode || error?.response?.statusCode;
+      if (statusCode === 404) {
+        // Not found in this provider, will try others
+        return null;
+      }
+      logger.error({ error, name, namespace, providerId }, 'Error getting deployment from provider');
       return null;
     }
   }
 
   async createDeployment(config: DeploymentConfig, providerId?: string): Promise<void> {
-    // Get the provider
-    const activeProviderId = providerId || await configService.getActiveProviderId();
-    const provider = providerRegistry.getProvider(activeProviderId);
+    // Get the provider - prefer config.provider, then explicit providerId, then fall back to active provider
+    const resolvedProviderId = config.provider || providerId || await configService.getActiveProviderId();
+    const provider = providerRegistry.getProvider(resolvedProviderId);
     const crdConfig = provider.getCRDConfig();
 
     // Generate manifest using provider
-    const manifest = provider.generateManifest(config);
+    const manifest = provider.generateManifest(config) as Record<string, unknown>;
+
+    // Add kubefoundry.io/provider label for easier querying
+    const metadata = manifest.metadata as Record<string, unknown> || {};
+    const labels = (metadata.labels as Record<string, string>) || {};
+    labels['kubefoundry.io/provider'] = resolvedProviderId;
+    metadata.labels = labels;
+    manifest.metadata = metadata;
 
     await withRetry(
       () => this.customObjectsApi.createNamespacedCustomObject(
@@ -184,9 +294,27 @@ class KubernetesService {
   }
 
   async deleteDeployment(name: string, namespace: string, providerId?: string): Promise<void> {
-    // Get the provider
-    const activeProviderId = providerId || await configService.getActiveProviderId();
-    const provider = providerRegistry.getProvider(activeProviderId);
+    // If provider is specified, delete from that provider
+    if (providerId) {
+      await this.deleteDeploymentFromProvider(name, namespace, providerId);
+      return;
+    }
+
+    // First, find which provider has this deployment
+    const deployment = await this.getDeployment(name, namespace);
+    if (!deployment) {
+      throw new Error(`Deployment '${name}' not found in namespace '${namespace}'`);
+    }
+
+    // Use the provider from the deployment status
+    await this.deleteDeploymentFromProvider(name, namespace, deployment.provider);
+  }
+
+  /**
+   * Delete a deployment from a specific provider
+   */
+  private async deleteDeploymentFromProvider(name: string, namespace: string, providerId: string): Promise<void> {
+    const provider = providerRegistry.getProvider(providerId);
     const crdConfig = provider.getCRDConfig();
 
     await withRetry(
@@ -239,6 +367,43 @@ class KubernetesService {
       customObjectsApi: this.customObjectsApi,
       coreV1Api: this.coreV1Api,
     });
+  }
+
+  /**
+   * Get status of all runtimes (providers) in the cluster.
+   * Returns installation and health status for each runtime.
+   */
+  async getRuntimesStatus(): Promise<RuntimeStatus[]> {
+    const allProviders = providerRegistry.listProviders();
+    
+    const statusPromises = allProviders.map(async (provider): Promise<RuntimeStatus> => {
+      try {
+        const installStatus = await provider.checkInstallation({
+          customObjectsApi: this.customObjectsApi,
+          coreV1Api: this.coreV1Api,
+        });
+
+        return {
+          id: provider.id,
+          name: provider.name,
+          installed: installStatus.installed || (installStatus.crdFound ?? false),
+          healthy: installStatus.installed && (installStatus.operatorRunning ?? true),
+          version: installStatus.version,
+          message: installStatus.message,
+        };
+      } catch (error) {
+        logger.error({ error, providerId: provider.id }, 'Error checking runtime status');
+        return {
+          id: provider.id,
+          name: provider.name,
+          installed: false,
+          healthy: false,
+          message: error instanceof Error ? error.message : 'Unknown error checking status',
+        };
+      }
+    });
+
+    return Promise.all(statusPromises);
   }
 
   /**

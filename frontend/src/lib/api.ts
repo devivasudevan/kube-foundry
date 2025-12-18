@@ -50,6 +50,8 @@ export type {
   ProviderInfo,
   ProviderDetails,
   Settings,
+  RuntimeStatus,
+  RuntimesStatusResponse,
 } from '@kubefoundry/shared';
 
 // Installation types
@@ -128,6 +130,7 @@ import type {
   AutoscalerStatusInfo,
   DetailedClusterCapacity,
   PodFailureReason,
+  RuntimesStatusResponse,
 } from '@kubefoundry/shared';
 
 // ============================================================================
@@ -258,13 +261,22 @@ export const healthApi = {
 
 export const settingsApi = {
   get: () => request<Settings>('/settings'),
-  update: (settings: { activeProviderId?: string; defaultNamespace?: string }) =>
+  update: (settings: { defaultNamespace?: string }) =>
     request<{ message: string; config: Settings['config'] }>('/settings', {
       method: 'PUT',
       body: JSON.stringify(settings),
     }),
   listProviders: () => request<{ providers: ProviderInfo[] }>('/settings/providers'),
   getProvider: (id: string) => request<ProviderDetails>(`/settings/providers/${encodeURIComponent(id)}`),
+};
+
+// ============================================================================
+// Runtimes API
+// ============================================================================
+
+export const runtimesApi = {
+  /** Get status of all runtimes (installation and health) */
+  getStatus: () => request<RuntimesStatusResponse>('/runtimes/status'),
 };
 
 // ============================================================================

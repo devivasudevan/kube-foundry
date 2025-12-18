@@ -18,15 +18,15 @@ describe('useSettings', () => {
     expect(result.current.data?.providers).toBeDefined()
   })
 
-  it('returns active provider info', async () => {
+  it('returns provider list', async () => {
     const { result } = renderHook(() => useSettings(), {
       wrapper: createWrapper(),
     })
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
 
-    expect(result.current.data?.config.activeProviderId).toBeDefined()
-    expect(result.current.data?.activeProvider).toBeDefined()
+    expect(result.current.data?.providers).toBeDefined()
+    expect(Array.isArray(result.current.data?.providers)).toBe(true)
   })
 })
 
@@ -43,24 +43,13 @@ describe('useUpdateSettings', () => {
 
     const { result } = renderHook(() => useUpdateSettings(), { wrapper })
 
-    result.current.mutate({ activeProviderId: 'kuberay' })
+    result.current.mutate({ defaultNamespace: 'custom-namespace' })
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
 
     expect(result.current.data).toBeDefined()
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['settings'] })
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['cluster-status'] })
-  })
-
-  it('can update default namespace', async () => {
-    const { result } = renderHook(() => useUpdateSettings(), {
-      wrapper: createWrapper(),
-    })
-
-    result.current.mutate({ defaultNamespace: 'custom-namespace' })
-
-    await waitFor(() => expect(result.current.isSuccess).toBe(true))
-    expect(result.current.data?.message).toBe('Settings updated')
   })
 })
 

@@ -1,11 +1,10 @@
 import { useState } from 'react'
-import { useSettings } from '@/hooks/useSettings'
+import { useRuntimesStatus } from '@/hooks/useRuntimes'
 import { useClusterStatus } from '@/hooks/useClusterStatus'
 import {
   useHelmStatus,
   useProviderInstallationStatus,
   useInstallProvider,
-  useUpgradeProvider,
 } from '@/hooks/useInstallation'
 import { useAutoscalerDetection } from '@/hooks/useAutoscaler'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -13,6 +12,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/hooks/useToast'
 import { AutoscalerGuidance } from '@/components/autoscaler/AutoscalerGuidance'
+import { cn } from '@/lib/utils'
 import {
   CheckCircle,
   XCircle,
@@ -26,29 +26,32 @@ import {
   Zap,
 } from 'lucide-react'
 
+type RuntimeId = 'dynamo' | 'kuberay'
+
 export function InstallationPage() {
-  const { data: settings } = useSettings()
+  const { data: runtimesStatus, isLoading: runtimesLoading } = useRuntimesStatus()
   const { data: clusterStatus } = useClusterStatus()
   const { data: helmStatus, isLoading: helmLoading } = useHelmStatus()
   const { data: autoscaler, isLoading: autoscalerLoading } = useAutoscalerDetection()
   const { toast } = useToast()
 
-  const activeProviderId = settings?.config.activeProviderId || 'dynamo'
+  const [selectedRuntime, setSelectedRuntime] = useState<RuntimeId>('dynamo')
   const {
     data: installationStatus,
     isLoading: installationLoading,
     refetch: refetchInstallation,
-  } = useProviderInstallationStatus(activeProviderId)
+  } = useProviderInstallationStatus(selectedRuntime)
 
   const installProvider = useInstallProvider()
-  const upgradeProvider = useUpgradeProvider()
 
   const [isInstalling, setIsInstalling] = useState(false)
+  
+  const runtimes = runtimesStatus?.runtimes || []
 
-  const handleInstall = async () => {
+  const handleInstall = async (providerId: RuntimeId) => {
     setIsInstalling(true)
     try {
-      const result = await installProvider.mutateAsync(activeProviderId)
+      const result = await installProvider.mutateAsync(providerId)
       if (result.success) {
         toast({
           title: 'Installation Complete',
@@ -65,34 +68,6 @@ export function InstallationPage() {
     } catch (error) {
       toast({
         title: 'Installation Error',
-        description: error instanceof Error ? error.message : 'Unknown error occurred',
-        variant: 'destructive',
-      })
-    } finally {
-      setIsInstalling(false)
-    }
-  }
-
-  const handleUpgrade = async () => {
-    setIsInstalling(true)
-    try {
-      const result = await upgradeProvider.mutateAsync(activeProviderId)
-      if (result.success) {
-        toast({
-          title: 'Upgrade Complete',
-          description: result.message,
-        })
-        refetchInstallation()
-      } else {
-        toast({
-          title: 'Upgrade Failed',
-          description: result.message,
-          variant: 'destructive',
-        })
-      }
-    } catch (error) {
-      toast({
-        title: 'Upgrade Error',
         description: error instanceof Error ? error.message : 'Unknown error occurred',
         variant: 'destructive',
       })
@@ -119,16 +94,16 @@ export function InstallationPage() {
     }
   }
 
-  const isLoading = helmLoading || installationLoading
+  const isLoading = helmLoading || installationLoading || runtimesLoading
   const isInstalled = installationStatus?.installed ?? false
   const helmAvailable = helmStatus?.available ?? false
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Provider Installation</h1>
+        <h1 className="text-3xl font-bold tracking-tight">Runtime Installation</h1>
         <p className="text-muted-foreground">
-          Install and manage inference providers in your Kubernetes cluster.
+          Install and manage inference runtimes in your Kubernetes cluster.
         </p>
       </div>
 
@@ -140,7 +115,7 @@ export function InstallationPage() {
             Prerequisites
           </CardTitle>
           <CardDescription>
-            Required components for provider installation
+            Required components for runtime installation
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -194,6 +169,67 @@ export function InstallationPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Runtimes Overview - Side by Side Cards */}
+      <div>
+        <h2 className="text-xl font-semibold mb-4">Available Runtimes</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {runtimes.map((runtime) => (
+            <Card 
+              key={runtime.id}
+              className={cn(
+                'transition-all cursor-pointer',
+                selectedRuntime === runtime.id 
+                  ? 'ring-2 ring-primary' 
+                  : 'hover:border-primary/50'
+              )}
+              onClick={() => setSelectedRuntime(runtime.id as RuntimeId)}
+            >
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center justify-between">
+                  <span>{runtime.name}</span>
+                  <Badge variant={runtime.installed ? (runtime.healthy ? 'default' : 'secondary') : 'destructive'}>
+                    {runtime.installed ? (runtime.healthy ? 'Healthy' : 'Unhealthy') : 'Not Installed'}
+                  </Badge>
+                </CardTitle>
+                <CardDescription>
+                  {runtime.id === 'dynamo' 
+                    ? 'NVIDIA Dynamo for high-performance GPU inference with vLLM, SGLang, and TensorRT-LLM' 
+                    : 'KubeRay for distributed Ray-based model serving with vLLM'}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2 text-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">CRD</span>
+                    {runtime.installed ? (
+                      <CheckCircle className="h-4 w-4 text-green-500" />
+                    ) : (
+                      <XCircle className="h-4 w-4 text-gray-400" />
+                    )}
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Operator</span>
+                    {runtime.healthy ? (
+                      <CheckCircle className="h-4 w-4 text-green-500" />
+                    ) : runtime.installed ? (
+                      <AlertTriangle className="h-4 w-4 text-yellow-500" />
+                    ) : (
+                      <XCircle className="h-4 w-4 text-gray-400" />
+                    )}
+                  </div>
+                  {runtime.version && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Version</span>
+                      <span className="font-mono text-xs">{runtime.version}</span>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </div>
       {/* Cluster Autoscaling Status */}
       <Card>
         <CardHeader>
@@ -273,13 +309,14 @@ export function InstallationPage() {
           )}
         </CardContent>
       </Card>
-      {/* Installation Status */}
+
+      {/* Selected Runtime Installation Details */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Download className="h-5 w-5" />
-              {installationStatus?.providerName || 'Provider'} Installation
+              {installationStatus?.providerName || runtimes.find(r => r.id === selectedRuntime)?.name || 'Runtime'} Installation
             </div>
             <Badge variant={isInstalled ? 'default' : 'destructive'}>
               {isInstalled ? 'Installed' : 'Not Installed'}
@@ -320,7 +357,7 @@ export function InstallationPage() {
               <div className="flex gap-3">
                 {!isInstalled && (
                   <Button
-                    onClick={handleInstall}
+                    onClick={() => handleInstall(selectedRuntime)}
                     disabled={isInstalling || !helmAvailable || !clusterStatus?.connected}
                     className="flex items-center gap-2"
                   >
@@ -332,7 +369,7 @@ export function InstallationPage() {
                     ) : (
                       <>
                         <Download className="h-4 w-4" />
-                        Install Provider
+                        Install {runtimes.find(r => r.id === selectedRuntime)?.name || 'Runtime'}
                       </>
                     )}
                   </Button>
@@ -354,7 +391,7 @@ export function InstallationPage() {
                   <div>
                     <p className="font-medium">Helm CLI not available</p>
                     <p className="mt-1">
-                      Automatic installation requires Helm. You can install the provider manually
+                      Automatic installation requires Helm. You can install the runtime manually
                       using the commands below.
                     </p>
                   </div>
@@ -372,7 +409,7 @@ export function InstallationPage() {
             <CardTitle className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Terminal className="h-5 w-5" />
-                Manual Installation Commands
+                Manual Installation Commands for {runtimes.find(r => r.id === selectedRuntime)?.name || 'Runtime'}
               </div>
               <Button variant="outline" size="sm" onClick={copyAllCommands}>
                 <Copy className="h-4 w-4 mr-2" />
@@ -380,7 +417,7 @@ export function InstallationPage() {
               </Button>
             </CardTitle>
             <CardDescription>
-              Run these commands to install the provider manually
+              Run these commands to install the runtime manually
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">

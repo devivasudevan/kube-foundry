@@ -1,7 +1,6 @@
 import { Link, useLocation } from 'react-router-dom'
 import { Box, Layers, Settings, Download, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useSettings } from '@/hooks/useSettings'
 import { Button } from '@/components/ui/button'
 
 const navigation = [
@@ -18,8 +17,6 @@ interface SidebarProps {
 
 export function Sidebar({ onNavigate }: SidebarProps) {
   const location = useLocation()
-  const { data: settings } = useSettings()
-  const providerId = settings?.activeProvider?.id || 'dynamo'
 
   const handleNavClick = () => {
     onNavigate?.()
@@ -78,23 +75,6 @@ export function Sidebar({ onNavigate }: SidebarProps) {
           )
         })}
       </nav>
-
-      {/* Provider indicator */}
-      <div className="border-t p-3 md:p-4">
-        <div className={cn(
-          'flex items-center gap-2 rounded-lg px-3 py-2.5 text-xs font-medium',
-          'transition-colors duration-150',
-          providerId === 'kuberay' 
-            ? 'bg-ray/10 text-ray dark:bg-ray/20' 
-            : 'bg-nvidia/10 text-nvidia dark:bg-nvidia/20'
-        )}>
-          <div className={cn(
-            'h-2 w-2 rounded-full animate-pulse-soft',
-            providerId === 'kuberay' ? 'bg-ray' : 'bg-nvidia'
-          )} />
-          <span>{providerId === 'kuberay' ? 'KubeRay' : 'NVIDIA Dynamo'}</span>
-        </div>
-      </div>
     </div>
   )
 }

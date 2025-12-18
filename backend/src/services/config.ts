@@ -6,7 +6,8 @@ import logger from '../lib/logger';
  * Application configuration stored in Kubernetes ConfigMap
  */
 export interface AppConfig {
-  activeProviderId: string;
+  /** @deprecated No longer used - each deployment specifies its own provider */
+  activeProviderId?: string;
   defaultNamespace?: string;
 }
 
@@ -40,9 +41,7 @@ class ConfigService {
    * Get the default configuration
    */
   private getDefaultConfig(): AppConfig {
-    const defaultProviderId = process.env.DEFAULT_PROVIDER || providerRegistry.getDefaultProviderId();
     return {
-      activeProviderId: defaultProviderId,
       defaultNamespace: process.env.DEFAULT_NAMESPACE,
     };
   }
@@ -122,11 +121,6 @@ class ConfigService {
       ...config,
     };
 
-    // Validate provider exists
-    if (!providerRegistry.hasProvider(newConfig.activeProviderId)) {
-      throw new Error(`Invalid provider ID: ${newConfig.activeProviderId}`);
-    }
-
     try {
       // Ensure namespace exists
       await this.ensureNamespace();
@@ -175,22 +169,25 @@ class ConfigService {
   }
 
   /**
-   * Get the active provider ID
+   * @deprecated Use provider from deployment config instead.
+   * Get the active provider ID - falls back to default if not set.
    */
   async getActiveProviderId(): Promise<string> {
     const config = await this.getConfig();
-    return config.activeProviderId;
+    return config.activeProviderId || providerRegistry.getDefaultProviderId();
   }
 
   /**
-   * Set the active provider
+   * @deprecated No longer used - each deployment specifies its own provider.
    */
   async setActiveProvider(providerId: string): Promise<void> {
+    logger.warn('setActiveProvider is deprecated - each deployment now specifies its own provider');
     await this.setConfig({ activeProviderId: providerId });
   }
 
   /**
-   * Get the active provider instance
+   * @deprecated Use provider from deployment config instead.
+   * Get the active provider instance.
    */
   async getActiveProvider() {
     const providerId = await this.getActiveProviderId();
@@ -198,8 +195,8 @@ class ConfigService {
   }
 
   /**
-   * Get the default namespace for deployments
-   * Uses provider's default if not overridden
+   * Get the default namespace for deployments.
+   * Returns configured namespace, or falls back to first available provider's namespace.
    */
   async getDefaultNamespace(): Promise<string> {
     const config = await this.getConfig();
@@ -207,7 +204,16 @@ class ConfigService {
       return config.defaultNamespace;
     }
     
-    const provider = await this.getActiveProvider();
+    // Try to use activeProviderId if set (backward compatibility)
+    if (config.activeProviderId) {
+      const provider = providerRegistry.getProviderOrNull(config.activeProviderId);
+      if (provider) {
+        return provider.defaultNamespace;
+      }
+    }
+    
+    // Fall back to dynamo's default namespace
+    const provider = providerRegistry.getProvider('dynamo');
     return provider.defaultNamespace;
   }
 

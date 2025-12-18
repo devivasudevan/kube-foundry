@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { useSettings, useUpdateSettings, useProviderDetails } from '@/hooks/useSettings'
+import { useSettings, useProviderDetails } from '@/hooks/useSettings'
+import { useRuntimesStatus } from '@/hooks/useRuntimes'
 import { useClusterStatus } from '@/hooks/useClusterStatus'
 import { useHelmStatus } from '@/hooks/useInstallation'
 import { useGpuOperatorStatus, useInstallGpuOperator } from '@/hooks/useGpuOperator'
@@ -8,24 +9,18 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
-import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Skeleton } from '@/components/ui/skeleton'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { useToast } from '@/hooks/useToast'
-import { CheckCircle, XCircle, AlertCircle, Loader2, Server, Settings as SettingsIcon, Terminal, Cpu, Key, Cog } from 'lucide-react'
+import { CheckCircle, XCircle, AlertCircle, Loader2, Server, Terminal, Cpu, Key, Cog, Layers } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { Link } from 'react-router-dom'
 
 type SettingsTab = 'general' | 'integrations' | 'advanced'
 
 export function SettingsPage() {
-  const { data: settings, isLoading: settingsLoading } = useSettings()
+  const { isLoading: settingsLoading } = useSettings()
+  const { data: runtimesStatus, isLoading: runtimesLoading } = useRuntimesStatus()
   const { data: clusterStatus, isLoading: clusterLoading } = useClusterStatus()
   const { data: helmStatus } = useHelmStatus()
   const { data: gpuOperatorStatus, isLoading: gpuStatusLoading, refetch: refetchGpuStatus } = useGpuOperatorStatus()
@@ -33,35 +28,16 @@ export function SettingsPage() {
   const { startOAuth } = useHuggingFaceOAuth()
   const deleteHfSecret = useDeleteHuggingFaceSecret()
   const installGpuOperator = useInstallGpuOperator()
-  const updateSettings = useUpdateSettings()
   const { toast } = useToast()
 
-  const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null)
   const [isInstallingGpu, setIsInstallingGpu] = useState(false)
   const [isConnectingHf, setIsConnectingHf] = useState(false)
   const [activeTab, setActiveTab] = useState<SettingsTab>('general')
-  const activeProviderId = selectedProviderId || settings?.config.activeProviderId || 'dynamo'
+  const [selectedRuntimeForDetails, setSelectedRuntimeForDetails] = useState<string>('dynamo')
 
-  const { data: providerDetails } = useProviderDetails(activeProviderId)
+  const { data: providerDetails } = useProviderDetails(selectedRuntimeForDetails)
 
-  const handleProviderChange = async (newProviderId: string) => {
-    setSelectedProviderId(newProviderId)
-    try {
-      await updateSettings.mutateAsync({ activeProviderId: newProviderId })
-      toast({
-        title: 'Settings updated',
-        description: `Active provider changed to ${newProviderId}`,
-      })
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: 'Failed to update settings',
-        variant: 'destructive',
-      })
-    }
-  }
-
-  if (settingsLoading || clusterLoading) {
+  if (settingsLoading || clusterLoading || runtimesLoading) {
     return (
       <div className="space-y-6">
         <div>
@@ -70,7 +46,7 @@ export function SettingsPage() {
             Settings
           </h1>
           <p className="text-muted-foreground mt-1">
-            Configure your inference provider and application settings.
+            Configure your inference runtimes and application settings.
           </p>
         </div>
         <div className="space-y-4">
@@ -82,8 +58,8 @@ export function SettingsPage() {
     )
   }
 
-  const providerInstallation = clusterStatus?.providerInstallation
-  const isInstalled = providerInstallation?.installed ?? false
+  const runtimes = runtimesStatus?.runtimes || []
+  const installedCount = runtimes.filter(r => r.installed).length
 
   const tabs = [
     { id: 'general' as const, label: 'General', icon: Server },
@@ -99,7 +75,7 @@ export function SettingsPage() {
           Settings
         </h1>
         <p className="text-muted-foreground mt-1">
-          Configure your inference provider and application settings.
+          Configure your inference runtimes and application settings.
         </p>
       </div>
 
@@ -136,7 +112,7 @@ export function SettingsPage() {
                 Cluster Status
               </CardTitle>
               <CardDescription>
-                Current Kubernetes cluster connection and provider status
+                Current Kubernetes cluster connection status
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -165,135 +141,99 @@ export function SettingsPage() {
               )}
 
               <div className="flex items-center justify-between">
-                <span className="text-sm font-medium">Active Provider</span>
-                <Badge variant={isInstalled ? 'default' : 'destructive'}>
-                  {clusterStatus?.provider?.name || 'Unknown'}
+                <span className="text-sm font-medium">Runtimes Installed</span>
+                <Badge variant={installedCount > 0 ? 'default' : 'secondary'}>
+                  {installedCount} of {runtimes.length}
                 </Badge>
               </div>
+            </CardContent>
+          </Card>
 
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium">Provider Status</span>
-                <div className="flex items-center gap-2">
-                  {isInstalled ? (
-                    <>
-                      <CheckCircle className="h-4 w-4 text-green-500" />
-                      <span className="text-sm text-green-600">Installed</span>
-                    </>
-                  ) : (
-                    <>
-                      <AlertCircle className="h-4 w-4 text-yellow-500" />
-                      <span className="text-sm text-yellow-600">Not Installed</span>
-                    </>
-                  )}
+          {/* Installed Runtimes */}
+          <Card variant="elevated">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Layers className="h-5 w-5" />
+                Installed Runtimes
+              </CardTitle>
+              <CardDescription>
+                Available inference runtimes in your cluster. Select a runtime when deploying models.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {runtimes.length === 0 ? (
+                <div className="rounded-lg bg-muted p-4 text-center text-sm text-muted-foreground">
+                  No runtimes detected. Visit the Installation page to set up a runtime.
                 </div>
-              </div>
+              ) : (
+                <div className="space-y-3">
+                  {runtimes.map((runtime) => (
+                    <div
+                      key={runtime.id}
+                      className={cn(
+                        'flex items-center justify-between rounded-lg border p-4 transition-colors',
+                        runtime.installed
+                          ? 'bg-card hover:bg-accent/50'
+                          : 'bg-muted/30 opacity-75'
+                      )}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={cn(
+                          'h-2.5 w-2.5 rounded-full',
+                          runtime.installed && runtime.healthy
+                            ? 'bg-green-500'
+                            : runtime.installed
+                            ? 'bg-yellow-500'
+                            : 'bg-gray-400'
+                        )} />
+                        <div>
+                          <div className="font-medium">{runtime.name}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {runtime.id === 'dynamo' ? 'dynamo-system' : 'kuberay-system'} namespace
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {runtime.version && (
+                          <span className="text-xs text-muted-foreground font-mono">
+                            v{runtime.version}
+                          </span>
+                        )}
+                        <Badge
+                          variant={runtime.installed ? (runtime.healthy ? 'default' : 'secondary') : 'destructive'}
+                          className="min-w-[90px] justify-center"
+                        >
+                          {runtime.installed ? (runtime.healthy ? 'Healthy' : 'Unhealthy') : 'Not Installed'}
+                        </Badge>
+                        {!runtime.installed && (
+                          <Link to="/installation">
+                            <Button variant="outline" size="sm">
+                              Install
+                            </Button>
+                          </Link>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
 
-              {providerInstallation?.message && (
-                <div className="rounded-lg bg-muted p-3 text-sm">
-                  {providerInstallation.message}
+              {installedCount === 0 && (
+                <div className="rounded-lg bg-yellow-50 dark:bg-yellow-950 p-4 text-sm text-yellow-800 dark:text-yellow-200">
+                  <div className="flex items-center gap-2 mb-2">
+                    <AlertCircle className="h-4 w-4" />
+                    <span className="font-medium">No runtimes installed</span>
+                  </div>
+                  <p>
+                    Install at least one runtime to deploy models.{' '}
+                    <Link to="/installation" className="underline hover:no-underline">
+                      Go to Installation page
+                    </Link>
+                  </p>
                 </div>
               )}
             </CardContent>
           </Card>
-
-          {/* Provider Selection */}
-          <Card variant="elevated">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <SettingsIcon className="h-5 w-5" />
-                Provider Settings
-              </CardTitle>
-              <CardDescription>
-                Select and configure your inference provider
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="provider">Active Provider</Label>
-                <Select
-                  value={activeProviderId}
-                  onValueChange={handleProviderChange}
-                  disabled={updateSettings.isPending}
-                >
-                  <SelectTrigger id="provider">
-                    <SelectValue placeholder="Select a provider" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {settings?.providers.map((provider) => (
-                      <SelectItem key={provider.id} value={provider.id}>
-                        {provider.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {providerDetails?.description && (
-                  <p className="text-sm text-muted-foreground">{providerDetails.description}</p>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="namespace">Default Namespace</Label>
-                <Input
-                  id="namespace"
-                  value={settings?.config.defaultNamespace || providerDetails?.defaultNamespace || ''}
-                  placeholder={providerDetails?.defaultNamespace || 'default'}
-                  disabled
-                  className="font-mono"
-                />
-                <p className="text-xs text-muted-foreground">
-                  The default Kubernetes namespace for deployments
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Installation Instructions */}
-          {!isInstalled && providerDetails && (
-            <Card className="border-yellow-200 bg-yellow-50 dark:border-yellow-900 dark:bg-yellow-950">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-yellow-800 dark:text-yellow-200">
-                  <AlertCircle className="h-5 w-5" />
-                  Provider Not Installed
-                </CardTitle>
-                <CardDescription className="text-yellow-700 dark:text-yellow-300">
-                  The {providerDetails.name} provider is not installed in your cluster. Follow the steps below to install it.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {providerDetails.installationSteps.map((step, index) => (
-                  <div key={index} className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-yellow-200 text-xs font-semibold text-yellow-800 dark:bg-yellow-800 dark:text-yellow-200">
-                        {index + 1}
-                      </span>
-                      <span className="font-medium text-yellow-800 dark:text-yellow-200">{step.title}</span>
-                    </div>
-                    <p className="ml-8 text-sm text-yellow-700 dark:text-yellow-300">{step.description}</p>
-                    {step.command && (
-                      <div className="ml-8 flex items-center gap-2">
-                        <code className="flex-1 rounded bg-yellow-100 px-3 py-2 text-sm font-mono text-yellow-900 dark:bg-yellow-900 dark:text-yellow-100">
-                          {step.command}
-                        </code>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            navigator.clipboard.writeText(step.command!)
-                            toast({
-                              title: 'Copied',
-                              description: 'Command copied to clipboard',
-                            })
-                          }}
-                        >
-                          Copy
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-          )}
         </div>
       )}
 
@@ -609,55 +549,75 @@ export function SettingsPage() {
       {/* Advanced Tab */}
       {activeTab === 'advanced' && (
         <div className="space-y-6 animate-fade-in">
-          {/* Provider Details */}
-          {providerDetails && (
-            <Card variant="elevated">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Terminal className="h-5 w-5" />
-                  Provider Details
-                </CardTitle>
-                <CardDescription>
-                  Technical details about the {providerDetails.name} provider
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-                  <div className="p-3 rounded-lg bg-muted/50">
-                    <span className="font-medium text-muted-foreground text-xs uppercase tracking-wider">API Group</span>
-                    <p className="font-mono text-foreground mt-1">{providerDetails.crdConfig.apiGroup}</p>
-                  </div>
-                  <div className="p-3 rounded-lg bg-muted/50">
-                    <span className="font-medium text-muted-foreground text-xs uppercase tracking-wider">API Version</span>
-                    <p className="font-mono text-foreground mt-1">{providerDetails.crdConfig.apiVersion}</p>
-                  </div>
-                  <div className="p-3 rounded-lg bg-muted/50">
-                    <span className="font-medium text-muted-foreground text-xs uppercase tracking-wider">CRD Kind</span>
-                    <p className="font-mono text-foreground mt-1">{providerDetails.crdConfig.kind}</p>
-                  </div>
-                  <div className="p-3 rounded-lg bg-muted/50">
-                    <span className="font-medium text-muted-foreground text-xs uppercase tracking-wider">Resource Plural</span>
-                    <p className="font-mono text-foreground mt-1">{providerDetails.crdConfig.plural}</p>
-                  </div>
-                </div>
+          {/* Runtime Details */}
+          <Card variant="elevated">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Terminal className="h-5 w-5" />
+                Runtime Details
+              </CardTitle>
+              <CardDescription>
+                Technical details about the inference runtimes
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Runtime selector tabs */}
+              <div className="flex gap-1 border-b">
+                {runtimes.map((runtime) => (
+                  <button
+                    key={runtime.id}
+                    onClick={() => setSelectedRuntimeForDetails(runtime.id)}
+                    className={cn(
+                      'px-4 py-2 text-sm font-medium transition-all duration-200 border-b-2 -mb-px rounded-t-md',
+                      selectedRuntimeForDetails === runtime.id
+                        ? 'border-primary text-primary bg-primary/5'
+                        : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                    )}
+                  >
+                    {runtime.name}
+                  </button>
+                ))}
+              </div>
 
-                {providerDetails.helmRepos.length > 0 && (
-                  <div className="pt-4 border-t">
-                    <span className="font-medium text-sm">Helm Repositories</span>
-                    <div className="mt-3 space-y-2">
-                      {providerDetails.helmRepos.map((repo, index) => (
-                        <div key={index} className="flex items-center gap-2 text-sm p-2 rounded bg-muted/30">
-                          <span className="font-mono font-medium text-primary">{repo.name}</span>
-                          <span className="text-muted-foreground">→</span>
-                          <span className="font-mono text-xs text-muted-foreground truncate">{repo.url}</span>
-                        </div>
-                      ))}
+              {providerDetails && (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                    <div className="p-3 rounded-lg bg-muted/50">
+                      <span className="font-medium text-muted-foreground text-xs uppercase tracking-wider">API Group</span>
+                      <p className="font-mono text-foreground mt-1">{providerDetails.crdConfig.apiGroup}</p>
+                    </div>
+                    <div className="p-3 rounded-lg bg-muted/50">
+                      <span className="font-medium text-muted-foreground text-xs uppercase tracking-wider">API Version</span>
+                      <p className="font-mono text-foreground mt-1">{providerDetails.crdConfig.apiVersion}</p>
+                    </div>
+                    <div className="p-3 rounded-lg bg-muted/50">
+                      <span className="font-medium text-muted-foreground text-xs uppercase tracking-wider">CRD Kind</span>
+                      <p className="font-mono text-foreground mt-1">{providerDetails.crdConfig.kind}</p>
+                    </div>
+                    <div className="p-3 rounded-lg bg-muted/50">
+                      <span className="font-medium text-muted-foreground text-xs uppercase tracking-wider">Resource Plural</span>
+                      <p className="font-mono text-foreground mt-1">{providerDetails.crdConfig.plural}</p>
                     </div>
                   </div>
-                )}
-              </CardContent>
-            </Card>
-          )}
+
+                  {providerDetails.helmRepos.length > 0 && (
+                    <div className="pt-4 border-t">
+                      <span className="font-medium text-sm">Helm Repositories</span>
+                      <div className="mt-3 space-y-2">
+                        {providerDetails.helmRepos.map((repo, index) => (
+                          <div key={index} className="flex items-center gap-2 text-sm p-2 rounded bg-muted/30">
+                            <span className="font-mono font-medium text-primary">{repo.name}</span>
+                            <span className="text-muted-foreground">→</span>
+                            <span className="font-mono text-xs text-muted-foreground truncate">{repo.url}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </CardContent>
+          </Card>
 
           {/* Debug Info */}
           <Card variant="outline">
@@ -666,7 +626,7 @@ export function SettingsPage() {
             </CardHeader>
             <CardContent>
               <div className="text-xs font-mono text-muted-foreground space-y-1">
-                <p>Provider ID: {activeProviderId}</p>
+                <p>Runtimes: {runtimes.map(r => `${r.id}(${r.installed ? 'installed' : 'not installed'})`).join(', ')}</p>
                 <p>Cluster Connected: {clusterStatus?.connected ? 'Yes' : 'No'}</p>
                 <p>Helm Available: {helmStatus?.available ? 'Yes' : 'No'}</p>
                 <p>GPU Operator: {gpuOperatorStatus?.installed ? 'Installed' : 'Not Installed'}</p>

@@ -48,14 +48,24 @@ Get current settings and available providers.
 **Response:**
 ```json
 {
-  "activeProviderId": "dynamo",
+  "config": {
+    "defaultNamespace": "kubefoundry-system"
+  },
   "providers": [
     {
       "id": "dynamo",
       "name": "NVIDIA Dynamo",
       "description": "GPU-accelerated inference with disaggregated serving"
+    },
+    {
+      "id": "kuberay",
+      "name": "KubeRay",
+      "description": "Ray-based distributed inference"
     }
-  ]
+  ],
+  "auth": {
+    "enabled": false
+  }
 }
 ```
 
@@ -65,7 +75,7 @@ Update application settings.
 **Request Body:**
 ```json
 {
-  "activeProviderId": "dynamo"
+  "defaultNamespace": "my-namespace"
 }
 ```
 
@@ -439,6 +449,7 @@ Create a new deployment.
 {
   "name": "qwen-deployment",
   "namespace": "kubefoundry-system",
+  "provider": "dynamo",
   "modelId": "Qwen/Qwen3-0.6B",
   "engine": "vllm",
   "mode": "aggregated",
@@ -450,11 +461,21 @@ Create a new deployment.
 }
 ```
 
+**Required Fields:**
+- `name` - Kubernetes resource name
+- `namespace` - Target namespace
+- `provider` - Runtime provider (`dynamo` or `kuberay`)
+- `modelId` - HuggingFace model ID
+- `engine` - Inference engine (`vllm`, `sglang`, or `trtllm` for Dynamo; `vllm` for KubeRay)
+- `hfTokenSecret` - Name of the Kubernetes secret containing HuggingFace token
+
 **Response:**
 ```json
 {
-  "success": true,
-  "deployment": { ... }
+  "message": "Deployment created successfully",
+  "name": "qwen-deployment",
+  "namespace": "kubefoundry-system",
+  "provider": "dynamo"
 }
 ```
 
@@ -471,6 +492,7 @@ Get deployment details including pod status.
   "namespace": "kubefoundry-system",
   "modelId": "Qwen/Qwen3-0.6B",
   "engine": "vllm",
+  "provider": "dynamo",
   "phase": "Running",
   "replicas": { "desired": 1, "ready": 1, "available": 1 },
   "pods": [
@@ -484,6 +506,42 @@ Get deployment details including pod status.
   "createdAt": "2024-01-15T10:30:00Z"
 }
 ```
+
+## Runtimes
+
+### GET /runtimes/status
+Get installation and health status of all runtimes.
+
+**Response:**
+```json
+{
+  "runtimes": [
+    {
+      "id": "dynamo",
+      "name": "NVIDIA Dynamo",
+      "installed": true,
+      "healthy": true,
+      "version": "0.1.0",
+      "message": "Operator running"
+    },
+    {
+      "id": "kuberay",
+      "name": "KubeRay",
+      "installed": false,
+      "healthy": false,
+      "message": "CRD not found"
+    }
+  ]
+}
+```
+
+**Fields:**
+- `id` - Runtime identifier (`dynamo` or `kuberay`)
+- `name` - Display name
+- `installed` - Whether the CRD is installed
+- `healthy` - Whether the operator pods are running
+- `version` - Detected version (if available)
+- `message` - Status message
 
 ### DELETE /deployments/:name
 Delete a deployment.

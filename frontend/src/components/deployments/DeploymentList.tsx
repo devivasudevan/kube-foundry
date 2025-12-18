@@ -97,8 +97,9 @@ export function DeploymentList({ deployments, isLoading }: DeploymentListProps) 
               <th className="px-4 py-3 text-left text-sm font-medium">Name</th>
               <th className="px-4 py-3 text-left text-sm font-medium hidden md:table-cell">Model</th>
               <th className="px-4 py-3 text-left text-sm font-medium hidden sm:table-cell">Engine</th>
+              <th className="px-4 py-3 text-left text-sm font-medium hidden lg:table-cell">Runtime</th>
               <th className="px-4 py-3 text-left text-sm font-medium">Status</th>
-              <th className="px-4 py-3 text-left text-sm font-medium hidden lg:table-cell">Replicas</th>
+              <th className="px-4 py-3 text-left text-sm font-medium hidden xl:table-cell">Replicas</th>
               <th className="px-4 py-3 text-left text-sm font-medium hidden md:table-cell">Age</th>
               <th className="px-4 py-3 text-right text-sm font-medium">Actions</th>
             </tr>
@@ -128,10 +129,18 @@ export function DeploymentList({ deployments, isLoading }: DeploymentListProps) 
                     {deployment.engine.toUpperCase()}
                   </Badge>
                 </td>
+                <td className="px-4 py-3 hidden lg:table-cell">
+                  <Badge 
+                    variant="secondary" 
+                    className={deployment.provider === 'kuberay' ? 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300' : 'bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300'}
+                  >
+                    {deployment.provider === 'kuberay' ? 'KubeRay' : 'Dynamo'}
+                  </Badge>
+                </td>
                 <td className="px-4 py-3">
                   <DeploymentStatusBadge phase={deployment.phase} />
                 </td>
-                <td className="px-4 py-3 hidden lg:table-cell">
+                <td className="px-4 py-3 hidden xl:table-cell">
                   <span className="text-sm" title={deployment.mode === 'disaggregated' ? 'Prefill / Decode replicas' : 'Worker replicas'}>
                     {formatReplicaStatus(deployment)}
                   </span>

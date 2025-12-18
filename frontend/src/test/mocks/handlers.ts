@@ -62,7 +62,6 @@ export const mockDeployments = [
 
 export const mockSettings = {
   config: {
-    activeProviderId: 'dynamo',
     defaultNamespace: 'kubefoundry-system',
   },
   providers: [
@@ -79,12 +78,6 @@ export const mockSettings = {
       defaultNamespace: 'kuberay',
     },
   ],
-  activeProvider: {
-    id: 'dynamo',
-    name: 'NVIDIA Dynamo',
-    description: 'GPU-accelerated inference with disaggregated serving',
-    defaultNamespace: 'kubefoundry-system',
-  },
 }
 
 export const handlers = [

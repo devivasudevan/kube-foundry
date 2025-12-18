@@ -10,7 +10,7 @@
     --duration-slow: 400ms;
     
     /* Glow color for shadows (RGB values) */
-    --glow-color: 0 0 0;
+    --glow-color: 59 130 246;
 
     /* Core color palette */
     --background: 0 0% 100%;
@@ -19,7 +19,7 @@
     --card-foreground: 222.2 84% 4.9%;
     --popover: 0 0% 100%;
     --popover-foreground: 222.2 84% 4.9%;
-    --primary: 79 100% 36%;
+    --primary: 217 91% 60%;
     --primary-foreground: 210 40% 98%;
     --secondary: 210 40% 96.1%;
     --secondary-foreground: 222.2 47.4% 11.2%;
@@ -31,7 +31,7 @@
     --destructive-foreground: 210 40% 98%;
     --border: 214.3 31.8% 91.4%;
     --input: 214.3 31.8% 91.4%;
-    --ring: 79 100% 36%;
+    --ring: 217 91% 60%;
     --radius: 0.5rem;
     
     /* Semantic status colors */
@@ -54,7 +54,7 @@
     --card-foreground: 210 40% 98%;
     --popover: 224 71% 8%;
     --popover-foreground: 210 40% 98%;
-    --primary: 79 100% 36%;
+    --primary: 217 91% 60%;
     --primary-foreground: 222.2 47.4% 11.2%;
     --secondary: 217.2 32.6% 17.5%;
     --secondary-foreground: 210 40% 98%;
@@ -66,7 +66,7 @@
     --destructive-foreground: 210 40% 98%;
     --border: 217.2 32.6% 20%;
     --input: 217.2 32.6% 17.5%;
-    --ring: 79 100% 36%;
+    --ring: 217 91% 60%;
     
     /* Semantic status colors (dark mode) */
     --success: 142 69% 45%;

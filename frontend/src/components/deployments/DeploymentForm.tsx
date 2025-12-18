@@ -1,19 +1,19 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Switch } from '@/components/ui/switch'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
 import { useConfetti } from '@/components/ui/confetti'
 import { useCreateDeployment, type DeploymentConfig } from '@/hooks/useDeployments'
-import { useSettings } from '@/hooks/useSettings'
 import { useHuggingFaceStatus } from '@/hooks/useHuggingFace'
 import { useToast } from '@/hooks/useToast'
 import { generateDeploymentName, cn } from '@/lib/utils'
-import { type Model, type DetailedClusterCapacity, type AutoscalerDetectionResult } from '@/lib/api'
-import { ChevronDown, AlertCircle, Rocket, CheckCircle2, Sparkles } from 'lucide-react'
+import { type Model, type DetailedClusterCapacity, type AutoscalerDetectionResult, type RuntimeStatus } from '@/lib/api'
+import { ChevronDown, AlertCircle, Rocket, CheckCircle2, Sparkles, AlertTriangle, Server } from 'lucide-react'
 import { CapacityWarning } from './CapacityWarning'
 import { calculateGpuRecommendation } from '@/lib/gpu-recommendations'
 
@@ -21,17 +21,38 @@ interface DeploymentFormProps {
   model: Model
   detailedCapacity?: DetailedClusterCapacity
   autoscaler?: AutoscalerDetectionResult
+  runtimes?: RuntimeStatus[]
 }
 
 type Engine = 'vllm' | 'sglang' | 'trtllm'
 type RouterMode = 'none' | 'kv' | 'round-robin'
 type DeploymentMode = 'aggregated' | 'disaggregated'
+type RuntimeId = 'dynamo' | 'kuberay'
 
-export function DeploymentForm({ model, detailedCapacity, autoscaler }: DeploymentFormProps) {
+// Runtime metadata for display
+const RUNTIME_INFO: Record<RuntimeId, { name: string; description: string; defaultNamespace: string }> = {
+  dynamo: {
+    name: 'NVIDIA Dynamo',
+    description: 'High-performance inference with KV-cache routing and disaggregated serving',
+    defaultNamespace: 'dynamo-system',
+  },
+  kuberay: {
+    name: 'KubeRay',
+    description: 'Ray-based serving with autoscaling and distributed inference',
+    defaultNamespace: 'kuberay-system',
+  },
+}
+
+// Engine support by runtime
+const RUNTIME_ENGINES: Record<RuntimeId, Engine[]> = {
+  dynamo: ['vllm', 'sglang', 'trtllm'],
+  kuberay: ['vllm'], // KubeRay only supports vLLM currently
+}
+
+export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }: DeploymentFormProps) {
   const navigate = useNavigate()
   const { toast } = useToast()
   const createDeployment = useCreateDeployment()
-  const { data: settings } = useSettings()
   const { data: hfStatus } = useHuggingFaceStatus()
   const formRef = useRef<HTMLFormElement>(null)
   const { trigger: triggerConfetti, ConfettiComponent } = useConfetti(2500)
@@ -40,14 +61,36 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler }: Deployme
   const isGatedModel = model.gated === true
   const needsHfAuth = isGatedModel && !hfStatus?.configured
 
+  // Determine default runtime: prefer Dynamo if installed, then KubeRay
+  const getDefaultRuntime = (): RuntimeId => {
+    if (!runtimes || runtimes.length === 0) return 'dynamo'
+    const dynamo = runtimes.find(r => r.id === 'dynamo')
+    if (dynamo?.installed) return 'dynamo'
+    const kuberay = runtimes.find(r => r.id === 'kuberay')
+    if (kuberay?.installed) return 'kuberay'
+    return 'dynamo'
+  }
+
+  const [selectedRuntime, setSelectedRuntime] = useState<RuntimeId>(getDefaultRuntime)
+  const selectedRuntimeStatus = runtimes?.find(r => r.id === selectedRuntime)
+  const isRuntimeInstalled = selectedRuntimeStatus?.installed ?? false
+
+  // Get supported engines for the selected runtime, filtered by model support
+  const getAvailableEngines = (): Engine[] => {
+    const runtimeEngines = RUNTIME_ENGINES[selectedRuntime]
+    return model.supportedEngines.filter(e => runtimeEngines.includes(e))
+  }
+  const availableEngines = getAvailableEngines()
+
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [config, setConfig] = useState<DeploymentConfig>({
     name: generateDeploymentName(model.id),
-    namespace: '',
+    namespace: RUNTIME_INFO[getDefaultRuntime()].defaultNamespace,
     modelId: model.id,
     servedModelName: model.id,  // Use HuggingFace model ID as served model name
-    engine: model.supportedEngines[0] || 'vllm',
+    engine: availableEngines[0] || 'vllm',
     mode: 'aggregated',
+    provider: getDefaultRuntime(),
     routerMode: 'none',
     replicas: 1,
     hfTokenSecret: import.meta.env.VITE_DEFAULT_HF_SECRET || 'hf-token-secret',
@@ -61,7 +104,7 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler }: Deployme
     decodeGpus: 1,
     // GPU resources for aggregated mode
     resources: {
-      gpu: undefined, // Will be set from recommendation
+      gpu: 0, // Will be set from recommendation
     },
   })
 
@@ -70,7 +113,7 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler }: Deployme
 
   // Set initial GPU value from recommendation when component mounts
   useEffect(() => {
-    if (config.resources?.gpu === undefined && gpuRecommendation.recommendedGpus > 0) {
+    if (config.resources?.gpu === 0 && gpuRecommendation.recommendedGpus > 0) {
       setConfig(prev => ({
         ...prev,
         resources: {
@@ -81,15 +124,22 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler }: Deployme
     }
   }, [gpuRecommendation.recommendedGpus])
 
-  // Set namespace from active provider when settings load
-  useEffect(() => {
-    if (settings?.activeProvider?.defaultNamespace && !config.namespace) {
-      setConfig(prev => ({
-        ...prev,
-        namespace: settings.activeProvider?.defaultNamespace || 'default'
-      }))
-    }
-  }, [settings?.activeProvider?.defaultNamespace])
+  // Handle runtime change - update namespace and engine
+  const handleRuntimeChange = (runtime: RuntimeId) => {
+    setSelectedRuntime(runtime)
+    const newAvailableEngines = model.supportedEngines.filter(e => RUNTIME_ENGINES[runtime].includes(e))
+    const currentEngineSupported = newAvailableEngines.includes(config.engine)
+    
+    setConfig(prev => ({
+      ...prev,
+      provider: runtime,
+      namespace: RUNTIME_INFO[runtime].defaultNamespace,
+      // Reset engine if current one isn't supported by new runtime
+      engine: currentEngineSupported ? prev.engine : (newAvailableEngines[0] || 'vllm'),
+      // Reset router mode if switching away from Dynamo
+      routerMode: runtime === 'dynamo' ? prev.routerMode : 'none',
+    }))
+  }
 
   // Keyboard shortcut: Cmd/Ctrl+Enter to submit
   useEffect(() => {
@@ -168,6 +218,10 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler }: Deployme
       return 'HuggingFace Auth Required'
     }
 
+    if (!isRuntimeInstalled) {
+      return 'Runtime Not Installed'
+    }
+
     switch (createDeployment.status) {
       case 'validating':
         return 'Validating...'
@@ -222,6 +276,75 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler }: Deployme
         </div>
       )}
 
+      {/* Runtime Selection */}
+      {runtimes && runtimes.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Server className="h-5 w-5" />
+              Runtime
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <RadioGroup
+              value={selectedRuntime}
+              onValueChange={(value) => handleRuntimeChange(value as RuntimeId)}
+              className="grid gap-4 sm:grid-cols-2"
+            >
+              {runtimes.map((runtime) => {
+                const info = RUNTIME_INFO[runtime.id as RuntimeId]
+                if (!info) return null
+                
+                return (
+                  <div
+                    key={runtime.id}
+                    className={cn(
+                      "relative flex items-start space-x-3 rounded-lg border p-4 cursor-pointer transition-colors",
+                      selectedRuntime === runtime.id
+                        ? "border-primary bg-primary/5"
+                        : "border-border hover:border-muted-foreground/50",
+                      !runtime.installed && "opacity-75"
+                    )}
+                    onClick={() => handleRuntimeChange(runtime.id as RuntimeId)}
+                  >
+                    <RadioGroupItem value={runtime.id} id={`runtime-${runtime.id}`} className="mt-1" />
+                    <div className="flex-1 space-y-1">
+                      <div className="flex items-center gap-2">
+                        <Label htmlFor={`runtime-${runtime.id}`} className="cursor-pointer font-medium">
+                          {info.name}
+                        </Label>
+                        {runtime.installed ? (
+                          <Badge variant="outline" className="text-green-600 border-green-500 text-xs">
+                            <CheckCircle2 className="h-3 w-3 mr-1" />
+                            Installed
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-yellow-600 border-yellow-500 text-xs">
+                            <AlertTriangle className="h-3 w-3 mr-1" />
+                            Not Installed
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {info.description}
+                      </p>
+                      {!runtime.installed && selectedRuntime === runtime.id && (
+                        <p className="text-xs text-yellow-600 dark:text-yellow-400 mt-2">
+                          <Link to="/installation" className="underline hover:no-underline">
+                            Install {info.name}
+                          </Link>{' '}
+                          before deploying.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </RadioGroup>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Basic Configuration */}
       <Card>
         <CardHeader>
@@ -250,7 +373,7 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler }: Deployme
                 id="namespace"
                 value={config.namespace}
                 onChange={(e) => updateConfig('namespace', e.target.value)}
-                placeholder={settings?.activeProvider?.defaultNamespace || 'default'}
+                placeholder={RUNTIME_INFO[selectedRuntime].defaultNamespace}
                 required
               />
             </div>
@@ -264,22 +387,28 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler }: Deployme
           <CardTitle>Inference Engine</CardTitle>
         </CardHeader>
         <CardContent>
-          <RadioGroup
-            value={config.engine}
-            onValueChange={(value) => updateConfig('engine', value as Engine)}
-            className="grid gap-4 sm:grid-cols-3"
-          >
-            {model.supportedEngines.map((engine) => (
-              <div key={engine} className="flex items-center space-x-2">
-                <RadioGroupItem value={engine} id={engine} />
-                <Label htmlFor={engine} className="cursor-pointer">
-                  {engine === 'vllm' && 'vLLM'}
-                  {engine === 'sglang' && 'SGLang'}
-                  {engine === 'trtllm' && 'TensorRT-LLM'}
-                </Label>
-              </div>
-            ))}
-          </RadioGroup>
+          {availableEngines.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No compatible engines available for this model with {RUNTIME_INFO[selectedRuntime].name}.
+            </p>
+          ) : (
+            <RadioGroup
+              value={config.engine}
+              onValueChange={(value) => updateConfig('engine', value as Engine)}
+              className="grid gap-4 sm:grid-cols-3"
+            >
+              {availableEngines.map((engine) => (
+                <div key={engine} className="flex items-center space-x-2">
+                  <RadioGroupItem value={engine} id={engine} />
+                  <Label htmlFor={engine} className="cursor-pointer">
+                    {engine === 'vllm' && 'vLLM'}
+                    {engine === 'sglang' && 'SGLang'}
+                    {engine === 'trtllm' && 'TensorRT-LLM'}
+                  </Label>
+                </div>
+              ))}
+            </RadioGroup>
+          )}
         </CardContent>
       </Card>
 
@@ -356,7 +485,7 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler }: Deployme
                   id="gpusPerReplica"
                   type="number"
                   min={1}
-                  max={detailedCapacity?.maxGpusPerNode || 8}
+                  max={detailedCapacity?.maxNodeGpuCapacity || 8}
                   value={config.resources?.gpu || gpuRecommendation.recommendedGpus}
                   onChange={(e) => {
                     const value = parseInt(e.target.value) || 1
@@ -380,7 +509,7 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler }: Deployme
               </div>
 
               {/* Router Mode is only applicable to Dynamo provider */}
-              {settings?.activeProvider?.id === 'dynamo' && (
+              {selectedRuntime === 'dynamo' && (
                 <div className="space-y-2">
                   <Label>Router Mode</Label>
                   <RadioGroup
@@ -573,7 +702,7 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler }: Deployme
         </Button>
         <Button
           type="submit"
-          disabled={createDeployment.isProcessing || needsHfAuth}
+          disabled={createDeployment.isProcessing || needsHfAuth || !isRuntimeInstalled}
           loading={createDeployment.isProcessing}
           className={cn(
             "flex-1 gap-2",

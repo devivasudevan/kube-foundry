@@ -11,6 +11,7 @@ export interface DeploymentConfig {
   modelId: string;               // HuggingFace model ID
   engine: Engine;                // Inference engine
   mode: DeploymentMode;
+  provider?: 'dynamo' | 'kuberay';  // Runtime provider (optional during transition)
   servedModelName?: string;      // Custom model name for API
   routerMode: RouterMode;
   replicas: number;              // Number of worker replicas (aggregated mode)

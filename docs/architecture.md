@@ -157,10 +157,11 @@ metadata:
 data:
   config.json: |
     {
-      "activeProviderId": "dynamo",
-      "providerConfigs": {}
+      "defaultNamespace": "kubefoundry-system"
     }
 ```
+
+**Note:** Each deployment specifies its own runtime (`provider` field). There is no global "active provider" - users select the runtime when creating a deployment.
 
 ## Frontend Architecture
 

@@ -8,11 +8,15 @@ export function useSettings() {
   })
 }
 
+/**
+ * Update settings (currently only defaultNamespace).
+ * Active provider is no longer a global setting - each deployment specifies its runtime.
+ */
 export function useUpdateSettings() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (settings: { activeProviderId?: string; defaultNamespace?: string }) =>
+    mutationFn: (settings: { defaultNamespace?: string }) =>
       settingsApi.update(settings),
     onSuccess: () => {
       // Invalidate settings and cluster status queries

@@ -1,6 +1,7 @@
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useModel, useHfModel } from '@/hooks/useModels'
 import { useAutoscalerDetection, useDetailedCapacity } from '@/hooks/useAutoscaler'
+import { useRuntimesStatus } from '@/hooks/useRuntimes'
 import { DeploymentForm } from '@/components/deployments/DeploymentForm'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -22,6 +23,7 @@ export function DeployPage() {
   const { data: model, isLoading, error } = isHfSource ? hfModelQuery : localModelQuery
   const { data: detailedCapacity } = useDetailedCapacity()
   const { data: autoscaler } = useAutoscalerDetection()
+  const { data: runtimesData } = useRuntimesStatus()
 
   if (isLoading) {
     return (
@@ -140,6 +142,7 @@ export function DeployPage() {
         model={model}
         detailedCapacity={detailedCapacity}
         autoscaler={autoscaler}
+        runtimes={runtimesData?.runtimes}
       />
     </div>
   )

@@ -3,11 +3,12 @@ import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import { HTTPException } from 'hono/http-exception';
 import { kubernetesService } from '../services/kubernetes';
-import { configService } from '../services/config';
+import { providerRegistry } from '../providers';
 import { metricsService } from '../services/metrics';
 import { validateGpuFit, formatGpuWarnings } from '../services/gpuValidation';
 import models from '../data/models.json';
 import logger from '../lib/logger';
+import type { DeploymentStatus } from '@kubefoundry/shared';
 import {
   namespaceSchema,
   resourceNameSchema,
@@ -39,9 +40,38 @@ const deployments = new Hono()
   .get('/', zValidator('query', listDeploymentsQuerySchema), async (c) => {
     try {
       const { namespace, limit, offset } = c.req.valid('query');
-      const resolvedNamespace = namespace || (await configService.getDefaultNamespace());
 
-      let deploymentsList = await kubernetesService.listDeployments(resolvedNamespace);
+      let deploymentsList: DeploymentStatus[] = [];
+
+      if (namespace) {
+        // If namespace specified, query that namespace only
+        deploymentsList = await kubernetesService.listDeployments(namespace);
+      } else {
+        // Query all provider namespaces and merge results
+        const providerNamespaces = providerRegistry.listProviderIds()
+          .map(id => providerRegistry.getProvider(id).defaultNamespace);
+        
+        // Remove duplicates
+        const uniqueNamespaces = [...new Set(providerNamespaces)];
+        
+        // Query all namespaces in parallel
+        const results = await Promise.all(
+          uniqueNamespaces.map(ns => kubernetesService.listDeployments(ns))
+        );
+        
+        // Merge and flatten
+        for (const result of results) {
+          deploymentsList.push(...result);
+        }
+        
+        // Sort by creation time (newest first)
+        deploymentsList.sort((a, b) => {
+          const dateA = new Date(a.createdAt).getTime();
+          const dateB = new Date(b.createdAt).getTime();
+          return dateB - dateA;
+        });
+      }
+
       const total = deploymentsList.length;
 
       // Apply pagination
@@ -71,8 +101,15 @@ const deployments = new Hono()
   .post('/', async (c) => {
     const body = await c.req.json();
 
-    // Get the active provider for validation
-    const provider = await configService.getActiveProvider();
+    // Provider is required - no more fallback to active provider
+    const providerId = body.provider;
+    if (!providerId) {
+      throw new HTTPException(400, {
+        message: 'The "provider" field is required. Please specify the runtime (dynamo or kuberay).',
+      });
+    }
+
+    const provider = providerRegistry.getProvider(providerId);
     const validationResult = provider.validateConfig(body);
 
     if (!validationResult.valid) {
@@ -82,6 +119,8 @@ const deployments = new Hono()
     }
 
     const config = validationResult.data!;
+    // Ensure provider is set on config
+    config.provider = providerId;
 
     // GPU fit validation
     let gpuWarnings: string[] = [];
@@ -110,13 +149,14 @@ const deployments = new Hono()
       logger.warn({ error: gpuError }, 'Could not perform GPU fit validation');
     }
 
-    await kubernetesService.createDeployment(config);
+    await kubernetesService.createDeployment(config, providerId);
 
     return c.json(
       {
         message: 'Deployment created successfully',
         name: config.name,
         namespace: config.namespace,
+        provider: providerId,
         ...(gpuWarnings.length > 0 && { warnings: gpuWarnings }),
       },
       201
@@ -176,7 +216,11 @@ const deployments = new Hono()
       const { namespace } = c.req.valid('query');
       const resolvedNamespace = namespace || (await configService.getDefaultNamespace());
 
-      const metricsResponse = await metricsService.getDeploymentMetrics(name, resolvedNamespace);
+      // Get deployment to determine its provider
+      const deployment = await kubernetesService.getDeployment(name, resolvedNamespace);
+      const providerId = deployment?.provider;
+
+      const metricsResponse = await metricsService.getDeploymentMetrics(name, resolvedNamespace, providerId);
       return c.json(metricsResponse);
     }
 )

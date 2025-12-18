@@ -43,7 +43,8 @@ export interface ProviderDetails extends ProviderInfo {
 }
 
 export interface AppConfig {
-  activeProviderId: string;
+  /** @deprecated No longer used - each deployment specifies its own provider */
+  activeProviderId?: string;
   defaultNamespace?: string;
 }
 
@@ -65,6 +66,25 @@ export interface UserInfo {
 export interface Settings {
   config: AppConfig;
   providers: ProviderInfo[];
-  activeProvider: ProviderInfo | null;
   auth: AuthConfig;
+}
+
+/**
+ * Runtime status for the runtimes endpoint
+ * Used to show installation and health status of each runtime
+ */
+export interface RuntimeStatus {
+  id: string;           // 'dynamo' | 'kuberay'
+  name: string;         // Display name
+  installed: boolean;   // CRD exists
+  healthy: boolean;     // Operator pods running
+  version?: string;     // Detected version
+  message?: string;     // Status message
+}
+
+/**
+ * Response for GET /api/runtimes/status
+ */
+export interface RuntimesStatusResponse {
+  runtimes: RuntimeStatus[];
 }

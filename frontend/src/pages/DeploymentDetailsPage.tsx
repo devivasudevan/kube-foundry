@@ -126,10 +126,19 @@ export function DeploymentDetailsPage() {
           <CardTitle>Status</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-4 sm:grid-cols-4">
+          <div className="grid gap-4 sm:grid-cols-5">
             <div>
               <p className="text-sm text-muted-foreground mb-1">Phase</p>
               <DeploymentStatusBadge phase={deployment.phase} />
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground mb-1">Runtime</p>
+              <Badge 
+                variant="secondary" 
+                className={deployment.provider === 'kuberay' ? 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300' : 'bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300'}
+              >
+                {deployment.provider === 'kuberay' ? 'KubeRay' : 'Dynamo'}
+              </Badge>
             </div>
             <div>
               <p className="text-sm text-muted-foreground mb-1">Replicas</p>

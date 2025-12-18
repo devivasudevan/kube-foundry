@@ -8,7 +8,6 @@ import { providerRegistry, listProviderInfo } from '../providers';
 import logger from '../lib/logger';
 
 const updateSettingsSchema = z.object({
-  activeProviderId: z.string().optional(),
   defaultNamespace: z.string().optional(),
 });
 
@@ -21,19 +20,10 @@ const settings = new Hono()
     logger.debug('Fetching settings');
     const config = await configService.getConfig();
     const providers = listProviderInfo();
-    const activeProvider = providerRegistry.getProviderOrNull(config.activeProviderId);
 
     return c.json({
       config,
       providers,
-      activeProvider: activeProvider
-        ? {
-            id: activeProvider.id,
-            name: activeProvider.name,
-            description: activeProvider.description,
-            defaultNamespace: activeProvider.defaultNamespace,
-          }
-        : null,
       auth: {
         enabled: authService.isAuthEnabled(),
       },
@@ -42,12 +32,6 @@ const settings = new Hono()
   .put('/', zValidator('json', updateSettingsSchema), async (c) => {
     const data = c.req.valid('json');
     logger.info({ updates: data }, 'Updating settings');
-
-    // Validate provider exists if being changed
-    if (data.activeProviderId && !providerRegistry.hasProvider(data.activeProviderId)) {
-      logger.warn({ providerId: data.activeProviderId }, 'Invalid provider ID requested');
-      throw new HTTPException(400, { message: `Invalid provider ID: ${data.activeProviderId}` });
-    }
 
     const updatedConfig = await configService.setConfig(data);
     logger.info({ config: updatedConfig }, 'Settings updated successfully');

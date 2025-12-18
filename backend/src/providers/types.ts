@@ -150,6 +150,7 @@ export const baseDeploymentConfigSchema = z.object({
   modelId: z.string().min(1),
   engine: z.enum(['vllm', 'sglang', 'trtllm']),
   mode: z.enum(['aggregated', 'disaggregated']).default('aggregated'),
+  provider: z.enum(['dynamo', 'kuberay']).optional(),
   servedModelName: z.string().optional(),
   routerMode: z.enum(['none', 'kv', 'round-robin']).default('none'),
   replicas: z.number().int().min(1).max(10).default(1),

@@ -98,9 +98,10 @@ class MetricsService {
    * 
    * @param deploymentName - Name of the deployment
    * @param namespace - Kubernetes namespace
+   * @param providerId - Provider ID (dynamo or kuberay) - if not provided, uses active provider
    * @returns MetricsResponse with available metrics or error
    */
-  async getDeploymentMetrics(deploymentName: string, namespace: string): Promise<MetricsResponse> {
+  async getDeploymentMetrics(deploymentName: string, namespace: string, providerId?: string): Promise<MetricsResponse> {
     const timestamp = new Date().toISOString();
 
     // Check if running in-cluster first
@@ -115,8 +116,22 @@ class MetricsService {
     }
 
     try {
-      // Get the active provider
-      const provider = await configService.getActiveProvider();
+      // Get provider - use specified provider or fall back to active provider
+      let provider;
+      if (providerId) {
+        provider = providerRegistry.getProvider(providerId);
+        if (!provider) {
+          return {
+            available: false,
+            error: `Provider ${providerId} not found`,
+            timestamp,
+            metrics: [],
+          };
+        }
+      } else {
+        // Fall back to active provider for backward compatibility
+        provider = await configService.getActiveProvider();
+      }
       
       // Check if provider supports metrics
       const metricsConfig = provider.getMetricsConfig();

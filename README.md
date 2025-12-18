@@ -75,8 +75,11 @@ Go to **Settings** → **HuggingFace** and click **"Sign in with Hugging Face"**
 2. **Browse** the curated catalog or **Search** HuggingFace for any compatible model
 3. **Review** GPU memory estimates and fit indicators (✓ fits, ⚠ tight, ✗ exceeds)
 4. Click **Deploy** on your chosen model
-5. **Configure** deployment options (engine, replicas, tensor parallelism, etc.)
-6. Click **Create Deployment** to launch
+5. **Select Runtime**: Choose between NVIDIA Dynamo or KubeRay based on installed runtimes
+6. **Configure** deployment options (engine, replicas, tensor parallelism, etc.)
+7. Click **Create Deployment** to launch
+
+> **Note:** Each deployment can use a different runtime. The deployment list shows which runtime each deployment is using.
 
 ### 4. Monitor Your Deployment
 
