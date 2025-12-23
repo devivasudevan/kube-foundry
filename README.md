@@ -1,12 +1,12 @@
 # KubeFoundry
 
-![KubeFoundry Logo](./frontend/public/logo.png)
+<img src="./frontend/public/logo.png" alt="KubeFoundry Logo" width="200">
 
 A web-based platform for deploying and managing large language models on Kubernetes with support for multiple inference providers.
 
 ## Features
 
-- �️ **Web UI**: Modern interface for all deployment and management tasks
+- 🕸️ **Web UI**: Modern interface for all deployment and management tasks
 - 📦 **Model Catalog**: Browse curated models or search the entire HuggingFace Hub
 - 🔍 **Smart Filtering**: Automatically filters models by architecture compatibility
 - 📊 **GPU Capacity Warnings**: Visual indicators showing if models fit your cluster's GPU memory
