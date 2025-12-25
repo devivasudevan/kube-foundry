@@ -383,6 +383,7 @@ class KubernetesService {
     return provider.checkInstallation({
       customObjectsApi: this.customObjectsApi,
       coreV1Api: this.coreV1Api,
+      apiExtensionsApi: this.apiExtensionsApi,
     });
   }
 
@@ -398,6 +399,7 @@ class KubernetesService {
         const installStatus = await provider.checkInstallation({
           customObjectsApi: this.customObjectsApi,
           coreV1Api: this.coreV1Api,
+          apiExtensionsApi: this.apiExtensionsApi,
         });
 
         return {

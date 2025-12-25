@@ -692,8 +692,8 @@ export class KubeRayProvider implements Provider {
       },
       {
         title: 'Install KubeRay Operator',
-        command: `helm install kuberay-operator kuberay/kuberay-operator --version ${version}`,
-        description: `Install the KubeRay operator v${version} which manages RayService and RayCluster resources.`,
+        command: `helm install kuberay-operator kuberay/kuberay-operator --namespace kuberay-system --create-namespace --version ${version}`,
+        description: `Install the KubeRay operator v${version} in the kuberay-system namespace which manages RayService and RayCluster resources.`,
       },
     ];
   }
@@ -714,8 +714,8 @@ export class KubeRayProvider implements Provider {
         name: 'kuberay-operator',
         chart: 'kuberay/kuberay-operator',
         version,
-        namespace: 'default',
-        createNamespace: false,
+        namespace: 'kuberay-system',
+        createNamespace: true,
       },
     ];
   }
@@ -753,9 +753,9 @@ export class KubeRayProvider implements Provider {
       // Check if kuberay-operator is running
       let operatorRunning = false;
       try {
-        // KubeRay operator typically runs in default namespace
+        // KubeRay operator runs in kuberay-system namespace
         const pods = await coreV1Api.listNamespacedPod(
-          'default',
+          'kuberay-system',
           undefined,
           undefined,
           undefined,
@@ -769,7 +769,7 @@ export class KubeRayProvider implements Provider {
         // Also try alternative label selector
         if (!operatorRunning) {
           const altPods = await coreV1Api.listNamespacedPod(
-            'default',
+            'kuberay-system',
             undefined,
             undefined,
             undefined,
@@ -896,9 +896,8 @@ export class KubeRayProvider implements Provider {
         `rayclusters.${KubeRayProvider.API_GROUP}`,
         `rayjobs.${KubeRayProvider.API_GROUP}`,
       ],
-      // KubeRay operator runs in default namespace, so we don't delete any namespace
-      // as it would be too destructive
-      namespaces: [],
+      // KubeRay operator namespace - can be deleted on uninstall
+      namespaces: ['kuberay-system'],
     };
   }
 }

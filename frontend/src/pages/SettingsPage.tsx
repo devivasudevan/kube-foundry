@@ -551,10 +551,8 @@ export function SettingsPage() {
                         <span className="text-muted-foreground">Operator</span>
                         {runtime.healthy ? (
                           <CheckCircle className="h-4 w-4 text-green-500" />
-                        ) : runtime.installed ? (
-                          <AlertTriangle className="h-4 w-4 text-yellow-500" />
                         ) : (
-                          <XCircle className="h-4 w-4 text-gray-400" />
+                          <XCircle className="h-4 w-4 text-red-500" />
                         )}
                       </div>
                       {runtime.version && (

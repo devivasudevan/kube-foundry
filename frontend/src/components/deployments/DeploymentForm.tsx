@@ -517,8 +517,9 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
                 const isCompatible = isRuntimeCompatible(runtime.id as RuntimeId, model.supportedEngines)
                 
                 return (
-                  <div
+                  <label
                     key={runtime.id}
+                    htmlFor={`runtime-${runtime.id}`}
                     className={cn(
                       "relative flex items-start space-x-3 rounded-lg border p-4 transition-colors",
                       !isCompatible && "opacity-50 cursor-not-allowed",
@@ -529,7 +530,6 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
                       isCompatible && selectedRuntime !== runtime.id && "hover:border-muted-foreground/50",
                       isCompatible && !runtime.installed && "opacity-75"
                     )}
-                    onClick={() => isCompatible && handleRuntimeChange(runtime.id as RuntimeId)}
                   >
                     <RadioGroupItem 
                       value={runtime.id} 
@@ -581,7 +581,7 @@ export function DeploymentForm({ model, detailedCapacity, autoscaler, runtimes }
                         </p>
                       )}
                     </div>
-                  </div>
+                  </label>
                 )
               })}
             </RadioGroup>

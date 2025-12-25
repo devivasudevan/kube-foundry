@@ -402,7 +402,7 @@ const installation = new Hono()
 
       logger.info(
         { providerId: id, providerName: provider.name },
-        `Starting uninstall of ${provider.name}`
+        `Starting uninstall of ${provider.name} (preserving CRDs)`
       );
 
       const results: Array<{ step: string; success: boolean; output: string; error?: string }> =
@@ -420,20 +420,20 @@ const installation = new Hono()
           output: result.stdout,
           error: result.stderr || undefined,
         });
+
+        // If uninstall fails, throw an error with the details
+        if (!result.success) {
+          const stderr = (result.stderr || 'Unknown error')
+            .replace(/[\x00-\x1F\x7F]/g, ' ')  // Replace control characters
+            .trim()
+            .slice(0, 500);  // Limit length
+          throw new HTTPException(500, {
+            message: `Failed to uninstall Helm chart "${chart.name}": ${stderr}`,
+          });
+        }
       }
 
-      // Step 2: Delete CRDs
-      for (const crdName of uninstallResources.crds) {
-        const result = await kubernetesService.deleteCRD(crdName);
-        results.push({
-          step: `Delete CRD: ${crdName}`,
-          success: result.success,
-          output: result.message,
-          error: result.success ? undefined : result.message,
-        });
-      }
-
-      // Step 3: Delete namespaces
+      // Step 2: Delete namespaces (but NOT CRDs - those require separate uninstall-crds call)
       for (const namespace of uninstallResources.namespaces) {
         const result = await kubernetesService.deleteNamespace(namespace);
         results.push({
@@ -448,7 +448,49 @@ const installation = new Hono()
 
       return c.json({
         success: true,
-        message: `${provider.name} uninstalled`,
+        message: `${provider.name} uninstalled (CRDs preserved - use "Uninstall CRDs" for complete removal)`,
+        installationStatus: verifyStatus,
+        results,
+      });
+    }
+  )
+  .post(
+    '/providers/:id/uninstall-crds',
+    zValidator('param', providerIdParamsSchema),
+    async (c) => {
+      const { id } = c.req.valid('param');
+
+      if (!providerRegistry.hasProvider(id)) {
+        throw new HTTPException(404, { message: `Provider not found: ${id}` });
+      }
+
+      const provider = providerRegistry.getProvider(id);
+      const uninstallResources = provider.getUninstallResources();
+
+      logger.info(
+        { providerId: id, providerName: provider.name, crds: uninstallResources.crds },
+        `Starting CRD uninstall for ${provider.name}`
+      );
+
+      const results: Array<{ step: string; success: boolean; output: string; error?: string }> =
+        [];
+
+      // Delete CRDs
+      for (const crdName of uninstallResources.crds) {
+        const result = await kubernetesService.deleteCRD(crdName);
+        results.push({
+          step: `Delete CRD: ${crdName}`,
+          success: result.success,
+          output: result.message,
+          error: result.success ? undefined : result.message,
+        });
+      }
+
+      const verifyStatus = await kubernetesService.checkProviderInstallation(id);
+
+      return c.json({
+        success: true,
+        message: `${provider.name} CRDs uninstalled`,
         installationStatus: verifyStatus,
         results,
       });

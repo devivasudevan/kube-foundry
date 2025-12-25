@@ -126,6 +126,7 @@ export interface Provider {
   checkInstallation(k8sApi: {
     customObjectsApi: unknown;
     coreV1Api: unknown;
+    apiExtensionsApi?: unknown;
   }): Promise<InstallationStatus>;
 
   /**

@@ -526,30 +526,56 @@ export class DynamoProvider implements Provider {
   async checkInstallation(k8sApi: {
     customObjectsApi: unknown;
     coreV1Api: unknown;
+    apiExtensionsApi?: unknown;
   }): Promise<InstallationStatus> {
-    const customObjectsApi = k8sApi.customObjectsApi as k8s.CustomObjectsApi;
     const coreV1Api = k8sApi.coreV1Api as k8s.CoreV1Api;
+    const apiExtensionsApi = k8sApi.apiExtensionsApi as k8s.ApiextensionsV1Api | undefined;
 
     logger.debug('Checking Dynamo installation status');
 
     try {
-      // Check if CRD exists by trying to list resources
+      // Check if CRD exists by looking for any Dynamo CRDs
       let crdFound = false;
-      try {
-        await customObjectsApi.listNamespacedCustomObject(
-          DynamoProvider.API_GROUP,
-          DynamoProvider.API_VERSION,
-          this.defaultNamespace,
-          DynamoProvider.CRD_PLURAL
-        );
-        crdFound = true;
-        logger.debug('Dynamo CRD found');
-      } catch (error: unknown) {
-        const k8sError = error as { response?: { statusCode?: number } };
-        // 404 means CRD doesn't exist, other errors might be permissions
-        if (k8sError?.response?.statusCode === 404) {
-          crdFound = false;
-          logger.debug('Dynamo CRD not found');
+      
+      // List of known Dynamo CRDs to check for
+      const dynamoCRDs = [
+        `dynamocomponentdeployments.${DynamoProvider.API_GROUP}`,
+        `dynamographdeploymentrequests.${DynamoProvider.API_GROUP}`,
+        `dynamomodels.${DynamoProvider.API_GROUP}`,
+        `${DynamoProvider.CRD_PLURAL}.${DynamoProvider.API_GROUP}`,
+      ];
+      
+      if (apiExtensionsApi) {
+        try {
+          const crdsResponse = await apiExtensionsApi.listCustomResourceDefinition();
+          const installedCRDs = crdsResponse.body.items.map(crd => crd.metadata?.name || '');
+          
+          // Check if any Dynamo CRD is installed
+          crdFound = dynamoCRDs.some(crdName => installedCRDs.includes(crdName));
+          logger.debug({ crdFound, installedDynamoCRDs: installedCRDs.filter(name => name.includes('dynamo')) }, 'Dynamo CRD check via apiextensions');
+        } catch (error) {
+          logger.warn({ error }, 'Failed to list CRDs via apiextensions API');
+        }
+      }
+      
+      // Fallback: try to list custom objects if apiExtensionsApi didn't work
+      if (!crdFound && k8sApi.customObjectsApi) {
+        const customObjectsApi = k8sApi.customObjectsApi as k8s.CustomObjectsApi;
+        try {
+          await customObjectsApi.listNamespacedCustomObject(
+            DynamoProvider.API_GROUP,
+            DynamoProvider.API_VERSION,
+            this.defaultNamespace,
+            DynamoProvider.CRD_PLURAL
+          );
+          crdFound = true;
+          logger.debug('Dynamo CRD found via custom objects API');
+        } catch (error: unknown) {
+          const k8sError = error as { response?: { statusCode?: number } };
+          // 404 means CRD doesn't exist, other errors might be permissions
+          if (k8sError?.response?.statusCode === 404) {
+            logger.debug('Dynamo CRD not found via custom objects API');
+          }
         }
       }
 
@@ -696,6 +722,9 @@ export class DynamoProvider implements Provider {
     return {
       // Dynamo CRDs installed by dynamo-crds chart
       crds: [
+        `dynamocomponentdeployments.${DynamoProvider.API_GROUP}`,
+        `dynamographdeploymentrequests.${DynamoProvider.API_GROUP}`,
+        `dynamomodels.${DynamoProvider.API_GROUP}`,
         `${DynamoProvider.CRD_PLURAL}.${DynamoProvider.API_GROUP}`,
         `dynamodeployments.${DynamoProvider.API_GROUP}`,
         `dynamojobs.${DynamoProvider.API_GROUP}`,

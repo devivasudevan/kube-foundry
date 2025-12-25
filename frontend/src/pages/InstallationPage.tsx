@@ -6,6 +6,7 @@ import {
   useProviderInstallationStatus,
   useInstallProvider,
   useUninstallProvider,
+  useUninstallProviderCRDs,
 } from '@/hooks/useInstallation'
 import { useAutoscalerDetection } from '@/hooks/useAutoscaler'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -46,10 +47,11 @@ export function InstallationPage() {
   const { toast } = useToast()
 
   const [selectedRuntime, setSelectedRuntime] = useState<RuntimeId | null>(null)
+  const [hasInitializedSelection, setHasInitializedSelection] = useState(false)
 
-  // Set default runtime once data is loaded: prefer installed runtime
+  // Set default runtime ONLY on initial load - prefer installed runtime
   useEffect(() => {
-    if (runtimesStatus?.runtimes && selectedRuntime === null) {
+    if (runtimesStatus?.runtimes && !hasInitializedSelection) {
       const runtimes = runtimesStatus.runtimes
       // Prefer first installed runtime, otherwise default to dynamo
       const installedRuntime = runtimes.find(r => r.installed)
@@ -58,8 +60,9 @@ export function InstallationPage() {
       } else {
         setSelectedRuntime('dynamo')
       }
+      setHasInitializedSelection(true)
     }
-  }, [runtimesStatus, selectedRuntime])
+  }, [runtimesStatus, hasInitializedSelection])
   const {
     data: installationStatus,
     isLoading: installationLoading,
@@ -68,10 +71,13 @@ export function InstallationPage() {
 
   const installProvider = useInstallProvider()
   const uninstallProvider = useUninstallProvider()
+  const uninstallProviderCRDs = useUninstallProviderCRDs()
 
   const [isInstalling, setIsInstalling] = useState(false)
   const [isUninstalling, setIsUninstalling] = useState(false)
+  const [isUninstallingCrds, setIsUninstallingCrds] = useState(false)
   const [showUninstallDialog, setShowUninstallDialog] = useState(false)
+  const [showUninstallCrdsDialog, setShowUninstallCrdsDialog] = useState(false)
 
   const runtimes = runtimesStatus?.runtimes || []
 
@@ -134,6 +140,36 @@ export function InstallationPage() {
       })
     } finally {
       setIsUninstalling(false)
+    }
+  }
+
+  const handleUninstallCrds = async (providerId: RuntimeId) => {
+    setIsUninstallingCrds(true)
+    setShowUninstallCrdsDialog(false)
+    try {
+      const result = await uninstallProviderCRDs.mutateAsync(providerId)
+      if (result.success) {
+        toast({
+          title: 'CRDs Uninstalled',
+          description: result.message,
+        })
+        refetchInstallation()
+      } else {
+        toast({
+          title: 'CRD Uninstall Failed',
+          description: result.message,
+          variant: 'destructive',
+        })
+      }
+    } catch (error) {
+      console.error('[Installation] CRD uninstall error:', error);
+      toast({
+        title: 'CRD Uninstall Error',
+        description: error instanceof Error ? error.message : `An unexpected error occurred. Please check the installation status.`,
+        variant: 'destructive',
+      })
+    } finally {
+      setIsUninstallingCrds(false)
     }
   }
 
@@ -320,7 +356,7 @@ export function InstallationPage() {
               key={runtime.id}
               className={cn(
                 'transition-all cursor-pointer',
-                effectiveRuntime === runtime.id
+                selectedRuntime === runtime.id
                   ? 'ring-2 ring-primary'
                   : 'hover:border-primary/50'
               )}
@@ -328,7 +364,19 @@ export function InstallationPage() {
             >
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center justify-between">
-                  <span>{runtime.name}</span>
+                  <div className="flex items-center gap-2">
+                    <div className={cn(
+                      "h-4 w-4 rounded-full border-2 flex items-center justify-center",
+                      selectedRuntime === runtime.id
+                        ? "border-primary"
+                        : "border-muted-foreground"
+                    )}>
+                      {selectedRuntime === runtime.id && (
+                        <div className="h-2 w-2 rounded-full bg-primary" />
+                      )}
+                    </div>
+                    <span>{runtime.name}</span>
+                  </div>
                   <Badge variant={runtime.installed ? (runtime.healthy ? 'default' : 'secondary') : 'destructive'}>
                     {runtime.installed ? (runtime.healthy ? 'Healthy' : 'Unhealthy') : 'Not Installed'}
                   </Badge>
@@ -355,10 +403,8 @@ export function InstallationPage() {
                     <span className="text-muted-foreground">Operator</span>
                     {runtime.healthy ? (
                       <CheckCircle className="h-4 w-4 text-green-500" />
-                    ) : runtime.installed ? (
-                      <AlertTriangle className="h-4 w-4 text-yellow-500" />
                     ) : (
-                      <XCircle className="h-4 w-4 text-gray-400" />
+                      <XCircle className="h-4 w-4 text-red-500" />
                     )}
                   </div>
                   {runtime.version && (
@@ -455,6 +501,28 @@ export function InstallationPage() {
                       <>
                         <Trash2 className="h-4 w-4" />
                         Uninstall {runtimes.find(r => r.id === effectiveRuntime)?.name || 'Runtime'}
+                      </>
+                    )}
+                  </Button>
+                )}
+
+                {/* Uninstall CRDs button - only show when CRDs are installed but operator is not */}
+                {!isInstalled && installationStatus?.crdFound && (
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowUninstallCrdsDialog(true)}
+                    disabled={isUninstallingCrds || !clusterStatus?.connected}
+                    className="flex items-center gap-2 text-destructive border-destructive hover:bg-destructive hover:text-destructive-foreground"
+                  >
+                    {isUninstallingCrds ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Uninstalling CRDs...
+                      </>
+                    ) : (
+                      <>
+                        <Trash2 className="h-4 w-4" />
+                        Uninstall CRDs
                       </>
                     )}
                   </Button>
@@ -603,6 +671,50 @@ export function InstallationPage() {
                 <>
                   <Trash2 className="h-4 w-4" />
                   Uninstall
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Uninstall CRDs Confirmation Dialog */}
+      <Dialog open={showUninstallCrdsDialog} onOpenChange={setShowUninstallCrdsDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="text-red-600">
+              Uninstall {runtimes.find(r => r.id === effectiveRuntime)?.name || 'Runtime'} CRDs?
+            </DialogTitle>
+            <DialogDescription>
+              This will delete all Custom Resource Definitions (CRDs) for{' '}
+              <strong>{runtimes.find(r => r.id === effectiveRuntime)?.name || 'this runtime'}</strong>.
+              <br /><br />
+              <strong className="text-red-600">Warning:</strong> This will also delete ALL custom resources
+              of these types across your entire cluster. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => setShowUninstallCrdsDialog(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => handleUninstallCrds(effectiveRuntime)}
+              disabled={isUninstallingCrds}
+              className="flex items-center gap-2"
+            >
+              {isUninstallingCrds ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Uninstalling CRDs...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="h-4 w-4" />
+                  Uninstall CRDs
                 </>
               )}
             </Button>

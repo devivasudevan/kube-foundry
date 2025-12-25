@@ -341,6 +341,11 @@ export const installationApi = {
     request<InstallResult>(`/installation/providers/${encodeURIComponent(providerId)}/uninstall`, {
       method: 'POST',
     }),
+
+  uninstallProviderCRDs: (providerId: string) =>
+    request<InstallResult>(`/installation/providers/${encodeURIComponent(providerId)}/uninstall-crds`, {
+      method: 'POST',
+    }),
 };
 
 // ============================================================================

@@ -63,3 +63,16 @@ export function useUninstallProvider() {
     },
   })
 }
+
+export function useUninstallProviderCRDs() {
+  const queryClient = useQueryClient()
+
+  return useMutation<InstallResult, Error, string>({
+    mutationFn: (providerId: string) => installationApi.uninstallProviderCRDs(providerId),
+    onSuccess: (_, providerId) => {
+      queryClient.invalidateQueries({ queryKey: ['provider-installation-status', providerId] })
+      queryClient.invalidateQueries({ queryKey: ['cluster-status'] })
+      queryClient.invalidateQueries({ queryKey: ['runtimes-status'] })
+    },
+  })
+}
