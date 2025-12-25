@@ -7,6 +7,7 @@ import { configService } from '../services/config';
 import { providerRegistry } from '../providers';
 import { metricsService } from '../services/metrics';
 import { validateGpuFit, formatGpuWarnings } from '../services/gpuValidation';
+import { handleK8sError } from '../lib/k8s-errors';
 import models from '../data/models.json';
 import logger from '../lib/logger';
 import type { DeploymentStatus } from '@kubefoundry/shared';
@@ -150,7 +151,22 @@ const deployments = new Hono()
       logger.warn({ error: gpuError }, 'Could not perform GPU fit validation');
     }
 
-    await kubernetesService.createDeployment(config, providerId);
+    // Create deployment with detailed error handling
+    try {
+      await kubernetesService.createDeployment(config, providerId);
+    } catch (error) {
+      const { message, statusCode } = handleK8sError(error, {
+        operation: 'createDeployment',
+        deploymentName: config.name,
+        namespace: config.namespace,
+        providerId,
+        modelId: config.modelId,
+      });
+
+      throw new HTTPException(statusCode as 400 | 403 | 404 | 409 | 422 | 500, {
+        message: `Failed to create deployment: ${message}`,
+      });
+    }
 
     return c.json(
       {
@@ -190,7 +206,24 @@ const deployments = new Hono()
       const { namespace } = c.req.valid('query');
       const resolvedNamespace = namespace || (await configService.getDefaultNamespace());
 
-      await kubernetesService.deleteDeployment(name, resolvedNamespace);
+      try {
+        await kubernetesService.deleteDeployment(name, resolvedNamespace);
+      } catch (error) {
+        // Check if it's a "not found" error from our own code
+        if (error instanceof Error && error.message.includes('not found')) {
+          throw new HTTPException(404, { message: error.message });
+        }
+
+        const { message, statusCode } = handleK8sError(error, {
+          operation: 'deleteDeployment',
+          deploymentName: name,
+          namespace: resolvedNamespace,
+        });
+
+        throw new HTTPException(statusCode as 400 | 403 | 404 | 500, {
+          message: `Failed to delete deployment: ${message}`,
+        });
+      }
 
       return c.json({ message: 'Deployment deleted successfully' });
     }

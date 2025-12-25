@@ -261,7 +261,9 @@ class HelmService {
       args.push('--set-json', JSON.stringify(chart.values));
     }
 
-    args.push('--wait', '--timeout', '10m');
+    // Don't use --wait - return immediately after submitting the install
+    // The caller should poll for installation status updates
+    // Timeout still applies to the install command itself
 
     return this.execute(args, onStream);
   }
@@ -310,6 +312,84 @@ class HelmService {
    */
   async status(releaseName: string, namespace: string): Promise<HelmResult> {
     return this.execute(['status', releaseName, '--namespace', namespace]);
+  }
+
+  /**
+   * Get detailed release info including status
+   */
+  async getReleaseInfo(releaseName: string, namespace: string): Promise<{ exists: boolean; status?: string; release?: HelmRelease; error?: string }> {
+    const listResult = await this.list(namespace);
+    if (!listResult.success) {
+      return { exists: false, error: listResult.error };
+    }
+
+    const release = listResult.releases.find(r => r.name === releaseName);
+    if (!release) {
+      return { exists: false };
+    }
+
+    return {
+      exists: true,
+      status: release.status,
+      release,
+    };
+  }
+
+  /**
+   * Check if a release is in a truly problematic state (failed only)
+   * Note: pending-install and pending-upgrade are expected during installation and are NOT problems
+   */
+  async checkReleaseProblems(charts: HelmChart[]): Promise<{ hasProblems: boolean; problems: Array<{ chart: string; namespace: string; status: string; message: string }> }> {
+    const problems: Array<{ chart: string; namespace: string; status: string; message: string }> = [];
+
+    for (const chart of charts) {
+      const info = await this.getReleaseInfo(chart.name, chart.namespace);
+      if (info.exists && info.status) {
+        const status = info.status.toLowerCase();
+        // Only treat 'failed' as problematic
+        // pending-install and pending-upgrade are normal during installation
+        if (status === 'failed') {
+          problems.push({
+            chart: chart.name,
+            namespace: chart.namespace,
+            status: info.status,
+            message: `Release "${chart.name}" is in failed state. Run "helm uninstall ${chart.name} -n ${chart.namespace}" and retry installation.`,
+          });
+        }
+      }
+    }
+
+    return {
+      hasProblems: problems.length > 0,
+      problems,
+    };
+  }
+
+  /**
+   * Check if any chart is currently being installed/upgraded (pending state)
+   * This is used to detect if a previous install is still in progress
+   */
+  async checkInstallInProgress(charts: HelmChart[]): Promise<{ inProgress: boolean; pendingCharts: Array<{ chart: string; namespace: string; status: string }> }> {
+    const pendingCharts: Array<{ chart: string; namespace: string; status: string }> = [];
+
+    for (const chart of charts) {
+      const info = await this.getReleaseInfo(chart.name, chart.namespace);
+      if (info.exists && info.status) {
+        const status = info.status.toLowerCase();
+        if (status === 'pending-install' || status === 'pending-upgrade' || status === 'pending-rollback') {
+          pendingCharts.push({
+            chart: chart.name,
+            namespace: chart.namespace,
+            status: info.status,
+          });
+        }
+      }
+    }
+
+    return {
+      inProgress: pendingCharts.length > 0,
+      pendingCharts,
+    };
   }
 
   /**

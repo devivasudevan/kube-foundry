@@ -177,12 +177,18 @@ async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
       dispatchUnauthorized();
     }
 
-    const error = await response.json().catch(() => ({ message: 'Unknown error' }));
-    console.error('[API] Error response:', error);
-    throw new ApiError(
-      response.status,
-      error.error?.message || error.message || 'Request failed'
-    );
+    // Try to parse error response body
+    let errorMessage: string;
+    try {
+      const error = await response.json();
+      errorMessage = error.error?.message || error.message || `Request failed with status ${response.status}`;
+    } catch {
+      // Response body is empty or not valid JSON
+      errorMessage = `Request failed with status ${response.status}: ${response.statusText || 'No response body'}`;
+    }
+    
+    console.error('[API] Error response:', errorMessage);
+    throw new ApiError(response.status, errorMessage);
   }
 
   return response.json();

@@ -6,9 +6,14 @@ import { kubernetesService } from '../services/kubernetes';
 import { helmService } from '../services/helm';
 import { providerRegistry } from '../providers';
 import logger from '../lib/logger';
+import { handleK8sError } from '../lib/k8s-errors';
 
 const providerIdParamsSchema = z.object({
   id: z.string().min(1),
+});
+
+const installQuerySchema = z.object({
+  force: z.enum(['true', 'false']).optional().transform(v => v === 'true'),
 });
 
 const installation = new Hono()
@@ -87,12 +92,26 @@ const installation = new Hono()
         throw new HTTPException(404, { message: `Provider not found: ${id}` });
       }
 
-      const installationStatus = await kubernetesService.checkProviderInstallation(id);
+      let installationStatus;
+      try {
+        installationStatus = await kubernetesService.checkProviderInstallation(id);
+      } catch (error) {
+        const { message, statusCode } = handleK8sError(error, { providerId: id, operation: 'checkInstallation' });
+        throw new HTTPException(statusCode as 400 | 401 | 403 | 404 | 500, {
+          message: `Failed to check installation status: ${message}`,
+        });
+      }
+
       const provider = providerRegistry.getProvider(id);
 
       // Refresh version from GitHub if provider supports it
-      if (provider.refreshVersion) {
-        await provider.refreshVersion();
+      try {
+        if (provider.refreshVersion) {
+          await provider.refreshVersion();
+        }
+      } catch (error) {
+        logger.warn({ error, providerId: id }, 'Failed to refresh provider version');
+        // Continue with cached version
       }
 
       return c.json({
@@ -140,8 +159,10 @@ const installation = new Hono()
   .post(
     '/providers/:id/install',
     zValidator('param', providerIdParamsSchema),
+    zValidator('query', installQuerySchema),
     async (c) => {
       const { id } = c.req.valid('param');
+      const { force } = c.req.valid('query');
 
       if (!providerRegistry.hasProvider(id)) {
         throw new HTTPException(404, { message: `Provider not found: ${id}` });
@@ -156,7 +177,17 @@ const installation = new Hono()
 
       const provider = providerRegistry.getProvider(id);
 
-      const currentStatus = await kubernetesService.checkProviderInstallation(id);
+      // Check current installation status with error handling
+      let currentStatus;
+      try {
+        currentStatus = await kubernetesService.checkProviderInstallation(id);
+      } catch (error) {
+        const { message, statusCode } = handleK8sError(error, { providerId: id, operation: 'checkInstallation' });
+        throw new HTTPException(statusCode as 400 | 401 | 403 | 404 | 500, {
+          message: `Failed to check installation status: ${message}`,
+        });
+      }
+
       if (currentStatus.installed) {
         return c.json({
           success: true,
@@ -166,28 +197,99 @@ const installation = new Hono()
       }
 
       // Refresh version from GitHub if provider supports it
-      if (provider.refreshVersion) {
-        await provider.refreshVersion();
+      try {
+        if (provider.refreshVersion) {
+          await provider.refreshVersion();
+        }
+      } catch (error) {
+        logger.warn({ error, providerId: id }, 'Failed to refresh provider version, using cached version');
+        // Continue with cached version
+      }
+
+      // Check for stuck/failed releases before attempting installation
+      const charts = provider.getHelmCharts();
+      const releaseProblems = await helmService.checkReleaseProblems(charts);
+      if (releaseProblems.hasProblems) {
+        if (force) {
+          // Force mode: uninstall problematic releases first
+          logger.info({ providerId: id, problems: releaseProblems.problems }, 'Force mode: cleaning up problematic releases');
+          for (const problem of releaseProblems.problems) {
+            logger.info({ chart: problem.chart, namespace: problem.namespace, status: problem.status }, `Uninstalling stuck release: ${problem.chart}`);
+            const uninstallResult = await helmService.uninstall(problem.chart, problem.namespace, (data, stream) => {
+              logger.debug({ stream }, data.trim());
+            });
+            if (!uninstallResult.success) {
+              logger.warn({ chart: problem.chart, stderr: uninstallResult.stderr }, 'Failed to uninstall stuck release, continuing anyway');
+            }
+          }
+        } else {
+          const problemMessages = releaseProblems.problems.map(p => p.message).join('\n');
+          throw new HTTPException(409, {
+            message: `Cannot install: existing Helm release(s) in problematic state.\n\n${problemMessages}\n\nTip: You can add ?force=true to automatically clean up stuck releases.`,
+          });
+        }
+      }
+
+      // Check if installation is already in progress
+      const inProgressCheck = await helmService.checkInstallInProgress(charts);
+      if (inProgressCheck.inProgress) {
+        const pendingNames = inProgressCheck.pendingCharts.map(c => `${c.chart} (${c.status})`).join(', ');
+        logger.info({ providerId: id, pendingCharts: inProgressCheck.pendingCharts }, 'Installation already in progress');
+        return c.json({
+          success: true,
+          message: `${provider.name} installation is already in progress. Please wait for it to complete.`,
+          installing: true,
+          pendingCharts: pendingNames,
+        });
       }
 
       logger.info(
         { providerId: id, providerName: provider.name },
         `Starting installation of ${provider.name}`
       );
-      const result = await helmService.installProvider(
-        provider.getHelmRepos(),
-        provider.getHelmCharts(),
-        (data, stream) => {
-          logger.debug({ stream }, data.trim());
-        }
-      );
+      
+      let result;
+      try {
+        result = await helmService.installProvider(
+          provider.getHelmRepos(),
+          provider.getHelmCharts(),
+          (data, stream) => {
+            logger.debug({ stream }, data.trim());
+          }
+        );
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error during Helm installation';
+        logger.error({ error, providerId: id }, 'Helm installation threw an exception');
+        throw new HTTPException(500, {
+          message: `Helm installation failed: ${errorMessage}`,
+        });
+      }
 
       if (result.success) {
-        const verifyStatus = await kubernetesService.checkProviderInstallation(id);
+        // Installation command was accepted - check current status
+        // Note: Without --wait, Helm returns immediately while installation progresses
+        let verifyStatus;
+        try {
+          verifyStatus = await kubernetesService.checkProviderInstallation(id);
+        } catch (error) {
+          logger.warn({ error, providerId: id }, 'Failed to verify installation status');
+          verifyStatus = { 
+            installed: false, 
+            crdFound: false,
+            operatorRunning: false,
+            message: 'Installation started, awaiting completion. Check status to monitor progress.' 
+          };
+        }
 
+        // If not fully installed yet, indicate it's in progress
+        const isFullyInstalled = verifyStatus.installed;
+        
         return c.json({
           success: true,
-          message: `${provider.name} installed successfully`,
+          message: isFullyInstalled 
+            ? `${provider.name} installed successfully` 
+            : `${provider.name} installation started. The operator is being deployed - check status for progress.`,
+          installing: !isFullyInstalled,
           installationStatus: verifyStatus,
           results: result.results.map((r) => ({
             step: r.step,
@@ -203,8 +305,15 @@ const installation = new Hono()
           .replace(/[\x00-\x1F\x7F]/g, ' ')  // Replace control characters
           .trim()
           .slice(0, 500);  // Limit length
+        
+        // Check if this is a timeout issue (could indicate pending-install)
+        const isTimeout = stderr.includes('timed out') || stderr.includes('timeout');
+        const suggestion = isTimeout 
+          ? ' The installation may still be in progress. Check with "helm list -A" and wait for the release to complete, or run "helm uninstall <release-name> -n <namespace>" to clean up.'
+          : '';
+        
         throw new HTTPException(500, {
-          message: `Installation failed at step "${failedStep?.step}": ${stderr}`,
+          message: `Installation failed at step "${failedStep?.step}": ${stderr}${suggestion}`,
         });
       }
     }

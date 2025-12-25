@@ -96,9 +96,10 @@ export function InstallationPage() {
         })
       }
     } catch (error) {
+      console.error('[Installation] Install error:', error);
       toast({
         title: 'Installation Error',
-        description: error instanceof Error ? error.message : 'Unknown error occurred',
+        description: error instanceof Error ? error.message : `An unexpected error occurred. Please check the installation status.`,
         variant: 'destructive',
       })
     } finally {
@@ -125,9 +126,10 @@ export function InstallationPage() {
         })
       }
     } catch (error) {
+      console.error('[Installation] Uninstall error:', error);
       toast({
         title: 'Uninstall Error',
-        description: error instanceof Error ? error.message : 'Unknown error occurred',
+        description: error instanceof Error ? error.message : `An unexpected error occurred. Please check the installation status.`,
         variant: 'destructive',
       })
     } finally {
