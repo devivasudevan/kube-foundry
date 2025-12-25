@@ -369,6 +369,42 @@ class KubernetesService {
       }
     }
 
+    // KubeRay creates pods with ray.io/cluster label set to a generated RayCluster name
+    // The RayCluster name is the RayService name with a random suffix, so we need to
+    // find pods where the ray.io/cluster label starts with the deployment name
+    try {
+      const response = await withRetry(
+        () => this.coreV1Api.listNamespacedPod(
+          namespace,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          'ray.io/cluster' // Just filter to Ray pods, then filter by name prefix
+        ),
+        { operationName: 'getDeploymentPods:kuberay', maxRetries: 1 }
+      );
+
+      // Filter pods where ray.io/cluster label starts with the deployment name
+      const matchingPods = response.body.items.filter(pod => {
+        const clusterLabel = pod.metadata?.labels?.['ray.io/cluster'] || '';
+        return clusterLabel.startsWith(name);
+      });
+
+      if (matchingPods.length > 0) {
+        logger.debug({ name, namespace, podCount: matchingPods.length }, 'Found KubeRay pods by cluster label prefix');
+        return matchingPods.map((pod): PodStatus => ({
+          name: pod.metadata?.name || 'unknown',
+          phase: (pod.status?.phase as PodPhase) || 'Unknown',
+          ready: pod.status?.containerStatuses?.every((cs) => cs.ready) || false,
+          restarts: pod.status?.containerStatuses?.reduce((sum, cs) => sum + cs.restartCount, 0) || 0,
+          node: pod.spec?.nodeName,
+        }));
+      }
+    } catch (error) {
+      logger.debug({ error, name, namespace }, 'Error trying KubeRay cluster label selector');
+    }
+
     logger.debug({ name, namespace }, 'No pods found with any label selector');
     return [];
   }
