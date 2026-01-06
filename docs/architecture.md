@@ -66,17 +66,17 @@ interface Provider {
   id: string;
   name: string;
   description: string;
-  
+
   // CRD configuration
   getCRDConfig(): CRDConfig;
-  
+
   // Manifest generation and parsing
   generateManifest(config: DeploymentConfig): object;
   parseStatus(resource: object): DeploymentStatus;
-  
+
   // Validation
   validateConfig(config: DeploymentConfig): ValidationResult;
-  
+
   // Installation
   checkInstallation(k8s: KubernetesService): Promise<InstallationStatus>;
   getHelmRepos(): HelmRepo[];
@@ -299,3 +299,14 @@ Handles KAITO/AIKit image operations:
 - List available pre-made GGUF models
 - Build custom images from HuggingFace GGUF files
 - Generate image references for deployments
+
+### AIConfiguratorService
+Interfaces with NVIDIA AI Configurator for optimal inference configuration:
+- Check if AI Configurator CLI is available locally (with 5-minute caching)
+- Analyze model + GPU combinations to get optimal settings (tensor parallelism, batch size, etc.)
+- Parse AI Configurator CSV output into deployment configuration
+- Support aggregated and disaggregated serving modes
+- Normalize GPU product labels to AI Configurator format
+- Provide sensible defaults when AI Configurator is unavailable
+- Input validation to prevent command injection attacks
+- Automatic temp directory cleanup with try/finally pattern
